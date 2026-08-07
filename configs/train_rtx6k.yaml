@@ -1,0 +1,75 @@
+# Epsilon on the rao allocation: 4x NVIDIA Quadro RTX 6000 (gpu-rtx6k).
+#
+# This config exists because configs/train_unet.yaml was written for 8xA100 and
+# does not fit here. Three hardware facts drive every difference:
+#
+#   1. Turing (sm_75) has NO bf16 tensor cores -> mixed_precision: fp16.
+#      (Leaving bf16 set makes the trainer warn and fall back; being explicit
+#      keeps the intent on the record.)
+#   2. 24 GB per card, not 80. batch_size 128/GPU with a 273M U-Net OOMs.
+#      Per-GPU batch drops to 16 and gradient checkpointing is on, which trades
+#      ~30% compute for a large activation-memory saving.
+#   3. Global batch is held at 1024 (16 x 4 GPUs x 16 accum) so the LR and the
+#      published recipe still transfer. Grad accumulation costs wall-clock, it
+#      does not change the optimisation.
+#
+# The model is also smaller than the flagship: 128 base channels and 2 res
+# blocks (~96M params vs 273M). On this hardware the full ADM-class model is
+# not reachable in the time available — see CLAUDE.md section 7 for the
+# throughput arithmetic. Train this first, measure it/s, THEN decide whether to
+# scale up on ckpt-all.
+
+path:
+  scheduler: condot
+
+model:
+  name: unet
+  prediction: velocity
+  num_classes: 1000
+  unet:
+    in_channels: 3
+    model_channels: 128          # 192 in the flagship config
+    channel_mult: [1, 2, 3, 4]
+    num_res_blocks: 2            # 3 in the flagship config
+    attention_resolutions: [16, 8]
+    num_heads: 4
+    dropout: 0.1
+    gradient_checkpointing: true # required to fit 24 GB
+
+data:
+  name: imagenet64
+  root: data/imagenet64
+  image_size: 64
+  num_workers: 4                 # 20 CPUs total / 4 GPUs, leave headroom
+  horizontal_flip: true
+
+training:
+  batch_size: 16                 # per GPU; 16 x 4 GPUs x 16 accum = 1024 global
+  grad_accum_steps: 16
+  total_steps: 400000            # ASPIRATIONAL — reset from measured it/s
+  lr: 1.0e-4
+  weight_decay: 0.0
+  warmup_steps: 5000
+  lr_schedule: constant
+  grad_clip: 1.0
+  ema_decay: 0.9999
+  cfg_dropout: 0.1
+  mixed_precision: fp16          # Turing: bf16 is unavailable
+  seed: 0
+
+eval:
+  sample_every: 5000
+  sample_classes: [207, 360, 387, 88, 979, 417, 279, 972]
+  sample_guidance_scale: 4.0
+  sample_steps: 100
+  fid_every: 0
+  fid_num_samples: 10000
+  fid_reference_dir: null
+
+logging:
+  output_dir: runs/rtx6k
+  log_every: 50
+  ckpt_every: 2000               # small: ckpt-all requeues jobs every ~4 h
+  wandb: true
+  wandb_project: epsilon
+  wandb_run_name: rtx6k-unet-cfm

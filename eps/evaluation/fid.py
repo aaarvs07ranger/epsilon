@@ -34,17 +34,22 @@ def sample_batch(
     num_steps: Optional[int] = None,
     method: Optional[str] = None,
     parameterization: Optional[str] = None,
+    solver: Optional[str] = None,
+    sigma: Optional[float] = None,
     callback=None,
 ) -> torch.Tensor:
     """Draw one batch of samples with the configured sampler.
 
-    All sampler knobs default to ``cfg.sampling`` but can be overridden
-    (the web demo passes its per-request settings through here).
+    All sampler knobs default to ``cfg.sampling`` but can be overridden per
+    call. The web demo passes its per-request settings through here rather than
+    mutating ``cfg``, which is shared across concurrent requests.
     """
     s = cfg.sampling
     method = method or s.method
     parameterization = parameterization or s.parameterization
     num_steps = num_steps or s.num_steps
+    solver = solver or s.solver
+    sigma = s.sigma if sigma is None else sigma
     w = s.guidance_scale if guidance_scale is None else guidance_scale
 
     guided = GuidedModel(
@@ -70,10 +75,10 @@ def sample_batch(
             fn = lambda x, t: path.velocity_from_score(guided.score(x, t), x, t)
             t_start, t_end = s.t_start, s.t_end
         return integrate_ode(
-            fn, x0, num_steps, t_start=t_start, t_end=t_end, solver=s.solver, callback=callback
+            fn, x0, num_steps, t_start=t_start, t_end=t_end, solver=solver, callback=callback
         )
     if method == "sde":
-        sigma_fn = make_sigma_fn(s.sigma, s.sigma_schedule, path.scheduler)
+        sigma_fn = make_sigma_fn(sigma, s.sigma_schedule, path.scheduler)
         return integrate_sde(
             guided.velocity_and_score,
             x0,

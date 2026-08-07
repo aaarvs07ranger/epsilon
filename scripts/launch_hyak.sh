@@ -1,23 +1,39 @@
 #!/bin/bash
 # Launch Epsilon training on UW Hyak (klone) via SLURM.
 #
-#   sbatch scripts/launch_hyak.sh configs/train_unet.yaml
-#   sbatch scripts/launch_hyak.sh configs/train_dit.yaml training.lr=2e-4
+#   sbatch scripts/launch_hyak.sh configs/train_rtx6k.yaml
+#   sbatch scripts/launch_hyak.sh configs/train_rtx6k.yaml training.lr=2e-4
 #
-# Account/partition are set for the Rao lab (group u_hyak_rao). VERIFY your
-# actual allocation before the first real run:
-#     hyakalloc                 # shows accounts + partitions + idle GPUs
-# If `hyakalloc` lists a different account name or GPU type, edit the two
-# #SBATCH lines below to match. `ckpt-all` is the preemptible checkpoint
-# partition — free idle capacity across the cluster, jobs can be requeued at
-# any time, which this script handles by auto-resuming.
+# Verified against `hyakalloc` on 2026-08-07: the rao account holds exactly one
+# GPU partition, `gpu-rtx6k` — 4x NVIDIA Quadro RTX 6000, 24 GB each, 20 CPUs
+# and 188 G of RAM in total. (There is no gpu-a40 under this account. The
+# gpu-a100 / gpu-l40s rows hyakalloc prints belong to the `cse` account, which
+# is a different allocation — do not submit there without checking you are
+# entitled to it.)
+#
+# Quadro RTX 6000 is Turing (sm_75): **no bf16 tensor cores**. Configs for this
+# partition must use mixed_precision=fp16; the trainer warns and falls back
+# automatically, but set it explicitly so the intent is on the record.
+#
+# For more/better hardware, submit to the preemptible checkpoint partition,
+# which is idle capacity from across the whole cluster (hyakalloc showed 66
+# idle GPUs there on 2026-08-07). Command-line flags override the #SBATCH
+# directives below, so no edit is needed:
+#
+#   sbatch --partition=ckpt-all --gpus=a40:4 scripts/launch_hyak.sh configs/train_unet.yaml
+#
+# Ampere/Ada cards there (a40, a100, l40s) DO support bf16, so pair that with
+# training.mixed_precision=bf16. Checkpoint jobs are requeued after ~4 hours of
+# runtime, so keep logging.ckpt_every small enough that a requeue costs minutes
+# rather than hours — losing 10k steps of progress to preemption is the classic
+# way to waste a week here.
 #
 #SBATCH --job-name=epsilon
 #SBATCH --account=rao
-#SBATCH --partition=gpu-a40
+#SBATCH --partition=gpu-rtx6k
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=20
 #SBATCH --mem=180G
 #SBATCH --gpus=4
 #SBATCH --time=48:00:00

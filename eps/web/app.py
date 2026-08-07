@@ -144,8 +144,6 @@ def generate(req: GenerateRequest) -> dict:
         raise HTTPException(400, "Provide 'prompt' or 'class_id'")
 
     cfg, net, path, device = _state["cfg"], _state["net"], _state["path"], _state["device"]
-    cfg.sampling.solver = req.solver
-    cfg.sampling.sigma = req.sigma
     seed = req.seed if req.seed is not None else int.from_bytes(os.urandom(4), "little")
     in_ch = cfg.model.unet.in_channels if cfg.model.name == "unet" else cfg.model.dit.in_channels
     size = cfg.data.image_size // 8 if cfg.training.latent_space else cfg.data.image_size
@@ -160,6 +158,10 @@ def generate(req: GenerateRequest) -> dict:
             num_steps=req.num_steps,
             method=req.method,
             parameterization=req.parameterization,
+            # Passed per-request, never written onto the shared cfg: two
+            # concurrent visitors must not see each other's solver/sigma.
+            solver=req.solver,
+            sigma=req.sigma,
         )
 
     buf = io.BytesIO()

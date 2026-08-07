@@ -92,12 +92,30 @@ class Trainer:
         )
 
         # Mixed precision ---------------------------------------------------
+        # bf16 tensor cores need Ampere (sm_80+). On older cards
+        # torch.cuda.is_bf16_supported() can still return True because recent
+        # PyTorch counts *emulated* bf16, which is slower than plain fp32 — so
+        # gate on the compute capability directly and fall back to fp16 rather
+        # than silently dropping to fp32 for the whole run.
         mp = cfg.training.mixed_precision
         self.autocast_dtype: Optional[torch.dtype] = None
-        if self.device.type == "cuda" and mp == "bf16" and torch.cuda.is_bf16_supported():
-            self.autocast_dtype = torch.bfloat16
-        elif self.device.type == "cuda" and mp == "fp16":
-            self.autocast_dtype = torch.float16
+        if self.device.type == "cuda":
+            major = torch.cuda.get_device_capability(self.device)[0]
+            if mp == "bf16":
+                if major >= 8:
+                    self.autocast_dtype = torch.bfloat16
+                else:
+                    self.autocast_dtype = torch.float16
+                    if is_main_process():
+                        print(
+                            f"[epsilon] WARNING: mixed_precision=bf16 but "
+                            f"{torch.cuda.get_device_name(self.device)} is sm_{major}x "
+                            "(bf16 needs sm_80+). Using fp16 instead."
+                        )
+            elif mp == "fp16":
+                self.autocast_dtype = torch.float16
+        elif mp in ("bf16", "fp16") and is_main_process():
+            print(f"[epsilon] mixed_precision={mp} ignored on {self.device.type}; using fp32.")
         self.scaler = torch.amp.GradScaler(
             enabled=self.autocast_dtype == torch.float16
         )

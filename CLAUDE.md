@@ -30,7 +30,8 @@
 | Git / GitHub | ✅ Public repo `aaarvs07ranger/epsilon`, pushed 2026-08-07 |
 | Hyak clone + venv | 🔄 In progress 2026-08-07 — cloned to `/gscratch/rao/aaravs07/epsilon`, pip install running |
 | GPU / driver compatibility | ⚠️ **Unverified** — torch is a CUDA 13 build, see §10.11 |
-| Partition name in `launch_hyak.sh` | ⚠️ `gpu-a40` is a *guess* — run `hyakalloc` and correct |
+| Partition name | ✅ **Resolved 2026-08-07**: `gpu-rtx6k` (not gpu-a40). See §7.1 |
+| **Compute scale vs. FID<12 target** | 🔴 **The rao allocation cannot reach the original recipe.** See §7.2 |
 | Dataset on Hyak | ⏳ Not fetched |
 | Real training run | ⏳ Not started |
 | FID reference set | ⏳ Not exported |
@@ -42,7 +43,7 @@ classes** (fish/sharks; `--limit` takes a class prefix, §6.3). Smoke tests only
 ### Immediate next actions, in order
 
 1. **Verify GPU + driver** with the `srun` check in §10.11 — this gates
-   everything and is 2 minutes. Also confirms the partition name.
+   everything and is 2 minutes. Confirms CUDA 13 works on these cards.
 2. **`pip cache purge`** to reclaim ~2.7 GB of the 10 GB home quota (§10.10).
 3. **Fetch the labeled data on Hyak** (§6.2), inside `tmux`. Final line must
    read `classes present: 1000/1000`.
@@ -312,7 +313,57 @@ Account state, from the access email — **do not re-derive this**:
 | Home quota | **10 GB** — keep caches off it (the launcher redirects `HF_HOME`, `TORCH_HOME`) |
 | Do **not** use | `/gscratch/cse` (explicitly per the access email) |
 | Job mail | `aaravs07@uw.edu` |
-| Partition | `gpu-a40` — ⚠️ **a guess.** Run `hyakalloc` and fix the `#SBATCH` line |
+| Partition | `gpu-rtx6k` — ✅ verified via `hyakalloc`, 2026-08-07 |
+
+### 7.1 What the rao allocation actually is
+
+`hyakalloc`, 2026-08-07:
+
+| Account | Partition | CPUs | Memory | GPUs |
+|---|---|---|---|---|
+| **rao** | **gpu-rtx6k** | 20 | 188 G | **4** (all idle) |
+| cse | gpu-a100 | 26 | 377 G | 4 (1 free) |
+| cse | gpu-l40s | 224 | 2645 G | 14 (1 free) |
+| — | ckpt-all (idle cluster-wide) | 663 | — | **66** |
+
+**There is no `gpu-a40` under this account** — the earlier config was a guess
+and was wrong. The `cse` rows are a *different allocation*; the access email
+said not to use `/gscratch/cse` storage, and entitlement to `cse` **compute**
+has not been confirmed. Do not submit there without checking.
+
+`gpu-rtx6k` = NVIDIA **Quadro RTX 6000**: Turing (sm_75), 24 GB GDDR6.
+Turing means **no bf16 tensor cores** (§10.13) and only 20 CPUs total across
+4 GPUs, so `num_workers` must stay modest.
+
+### 7.2 The scale problem — read before promising FID < 12
+
+The flagship recipe (273M U-Net, global batch 1024, 400k steps) was written for
+**8×A100**. The rao allocation is **4× Quadro RTX 6000**. The gap is not small:
+
+- Per card: A100 does ~312 TFLOPS bf16; Quadro RTX 6000 does ~32.6 TFLOPS fp16
+  with fp32 accumulate (the mode mixed-precision training actually uses).
+  That is roughly an order of magnitude per GPU, before counting half as many.
+- 24 GB vs 80 GB forces per-GPU batch 128 → 16 plus gradient checkpointing,
+  and grad accumulation to hold the global batch, which costs more wall-clock.
+
+Combined, the same recipe is **1–2 orders of magnitude slower here**. 400k
+steps is not reachable in a summer program on this partition. Treat any
+"400k steps / FID < 12" claim as unfunded until it is backed by measured it/s.
+
+Options, roughly in order of preference:
+
+1. **Use `ckpt-all`** — 66 idle GPUs cluster-wide, including Ampere/Ada parts
+   that *do* support bf16. Preemptible with ~4 h requeues, which the launcher
+   already auto-resumes through; needs a small `ckpt_every`.
+   `sbatch --partition=ckpt-all --gpus=a40:4 scripts/launch_hyak.sh ...`
+2. **Shrink the model** — `configs/train_rtx6k.yaml` is 92.5M params (128
+   channels, 2 res blocks), which fits 24 GB comfortably.
+3. **Cut the step budget** and report the FID you actually reach, honestly.
+4. **Drop to 32×32**, which is ~4× less compute per step, if 64×64 proves out
+   of reach. The codebase is resolution-agnostic.
+
+The decision is downstream of one measurement: **run the smoke test, read the
+it/s, multiply.** Do that before committing to any target.
 
 A partition mismatch is rejected at submit time, so it is cheap to verify but
 will waste a cycle if you skip it.
@@ -411,13 +462,12 @@ The 11.3 GB zip and the 125 MB dmg must never enter git history.
 **10.3 — `logging.wandb: true` in both training configs** crashes locally
 because wandb isn't installed. Override to `false` for every local run.
 
-**10.4 — Web demo mutates shared config outside its lock.** In
-`eps/web/app.py`, `cfg.sampling.solver` and `cfg.sampling.sigma` are assigned
-from the request *before* `with _lock:`. Two concurrent requests can interleave
-so one generates with the other's solver/σ. Not a crash, and single-user demos
-never hit it, but fix before any public deployment — move both assignments
-inside the lock, or (better) thread them through `sample_batch`'s existing
-override arguments instead of mutating `cfg`.
+**10.4 — ✅ FIXED 2026-08-07.** The web demo used to assign
+`cfg.sampling.solver` / `.sigma` from the request *before* taking `_lock`, so
+concurrent visitors could generate with each other's settings. `sample_batch`
+now takes `solver=` and `sigma=` overrides and the app passes them per request;
+`cfg` is never mutated. Verified: Euler vs Heun and σ=0 vs σ=2 produce
+different output while `cfg.sampling` stays at its defaults.
 
 **10.5 — `@app.on_event("startup")`** is deprecated in the installed FastAPI
 (0.141). Works today, emits a DeprecationWarning; migrate to a `lifespan`
@@ -442,6 +492,14 @@ torch (526 MB wheel) plus the CUDA libraries unpack ~6 GB of small files onto
 half-written torch. Afterwards run `.venv/bin/pip cache purge` — pip caches
 ~2.7 GB of wheels in `~/.cache/pip`, against the 10 GB home quota.
 
+**10.13 — Quadro RTX 6000 is Turing (sm_75) and has NO bf16 tensor cores.**
+Before 2026-08-07 the trainer silently ran **fp32** when `mixed_precision=bf16`
+was set on such a card (the `elif` only caught an explicit `fp16`), and newer
+PyTorch's `torch.cuda.is_bf16_supported()` can return True for *emulated* bf16,
+which is slower than fp32. `trainer.py` now gates on compute capability
+directly, falls back to fp16, and prints a warning. Configs for `gpu-rtx6k`
+should still say `fp16` explicitly.
+
 **10.11 — torch 2.13.0 installs a CUDA **13** build** (`nvidia-cudnn-cu13`,
 `nvidia-nccl-cu13`, `cuda-toolkit==13.0.3`, `nvidia-cublas==13.1.1.3`).
 CUDA 13 needs NVIDIA driver r580+. If Hyak's GPU nodes run an older driver,
@@ -450,7 +508,7 @@ driver version is insufficient for CUDA runtime version". **Check before
 queueing anything:**
 
 ```bash
-srun -A rao -p gpu-a40 --gpus=1 --time=00:10:00 --pty bash
+srun -A rao -p gpu-rtx6k --gpus=1 --time=00:10:00 --pty bash
 nvidia-smi     # driver version
 .venv/bin/python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
@@ -498,7 +556,8 @@ re-verified after the move.
 **2026-08-04** — Wired `launch_hyak.sh` to the real account: `--account=rao`,
 chdir `/gscratch/rao/aaravs07/epsilon`, mail to `aaravs07@uw.edu`, `--requeue`
 + auto-resume, W&B offline, caches redirected off the 10 GB home quota.
-`--partition=gpu-a40` guessed from the group name — still unverified.
+`--partition=gpu-a40` guessed from the group name — **later proved wrong**, see
+the 2026-08-07 entry.
 
 **2026-08-05** — Opened `train_64x64.zip`: 1,281,149 flat PNGs, no labels, no
 label file. Concluded it cannot support the class-conditional capstone. Added
@@ -545,3 +604,21 @@ transferred from the laptop.
 the venv install. Discovered §10.10 (pip appears hung on torch; it isn't) and
 §10.11 (torch 2.13.0 pulls a CUDA **13** build — driver compatibility on the
 GPU nodes is still unverified and is now the top gating item).
+
+**2026-08-07** — `hyakalloc` run. The rao account holds **`gpu-rtx6k`** (4×
+Quadro RTX 6000, 24 GB, Turing) — **not** `gpu-a40`, which does not exist here.
+Consequences worked through in §7.1/§7.2 and acted on:
+- Fixed a silent trainer bug (§10.13): `mixed_precision=bf16` on a pre-Ampere
+  card fell through to **fp32** for the entire run without saying anything.
+  Now gated on compute capability, falls back to fp16, prints a warning.
+- `launch_hyak.sh` corrected to `gpu-rtx6k`, `--cpus-per-task=20`, and
+  documented the `ckpt-all` override path for real scale.
+- Added `configs/train_rtx6k.yaml`: 92.5M params, per-GPU batch 16 with 16×
+  grad accumulation (global 1024 preserved), gradient checkpointing on, fp16.
+  Static GPU memory 1.85 GB of 24 GB, leaving room for activations.
+- **Recorded that the FID<12 / 400k-step target is not funded by this
+  allocation** (§7.2). Needs `ckpt-all`, a smaller scope, or an honest
+  restatement — decided after measuring it/s, not before.
+
+**2026-08-07** — Fixed §10.4, the web demo's shared-config race, by threading
+`solver` and `sigma` through `sample_batch` as per-request overrides.
