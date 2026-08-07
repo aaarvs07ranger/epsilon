@@ -11,14 +11,14 @@
 > §12 (Decision log) with today's date, and add anything newly discovered to
 > §10 (Traps). Do not let §1 go stale — a wrong status board is worse than none.
 > Prefer editing an existing line over appending a duplicate. Keep entries
-> factual and dated; write "verified <how>" or "unverified" rather than implying
-> certainty you do not have.
+> factual and dated; write `verified — <how>` or "unverified" rather than
+> implying certainty you do not have.
 
 ---
 
 ## 1. Status board
 
-**Last updated: 2026-08-06**
+**Last updated: 2026-08-07**
 
 | Area | State |
 |---|---|
@@ -27,22 +27,28 @@
 | Trainer (DDP, EMA, AMP, ckpt, resume) | ✅ Complete, smoke-tested locally on MPS |
 | Web demo (FastAPI + SPA) | ✅ Complete, loads without a checkpoint |
 | **Labeled data** | ✅ **Unblocked 2026-08-06** — see §6 |
-| Hyak deployment | ⏳ Not started. **Blocked on: repo is not under git** (§10.1) |
+| Git / GitHub | ✅ Public repo `aaarvs07ranger/epsilon`, pushed 2026-08-07 |
+| Hyak clone + venv | 🔄 In progress 2026-08-07 — cloned to `/gscratch/rao/aaravs07/epsilon`, pip install running |
+| GPU / driver compatibility | ⚠️ **Unverified** — torch is a CUDA 13 build, see §10.11 |
 | Partition name in `launch_hyak.sh` | ⚠️ `gpu-a40` is a *guess* — run `hyakalloc` and correct |
+| Dataset on Hyak | ⏳ Not fetched |
 | Real training run | ⏳ Not started |
 | FID reference set | ⏳ Not exported |
 | Public demo deployment | ⏳ Not started |
 
+Local-only convenience: `data/imagenet64_small` — 20k images but **only 16
+classes** (fish/sharks; `--limit` takes a class prefix, §6.3). Smoke tests only.
+
 ### Immediate next actions, in order
 
-1. **`git init` and push.** Nothing reaches Hyak until this exists — the deploy
-   path is `git clone`. This is the only hard blocker right now.
-2. **Fetch the labeled data** (§6). ~1.8 GB down, ~16 GB out, one command.
-3. **Get onto Hyak**, build the venv, run `hyakalloc`, fix the partition line.
-4. **200-step smoke test on Hyak** — proves venv builds, GPUs visible, DDP
-   initialises across cards.
+1. **Verify GPU + driver** with the `srun` check in §10.11 — this gates
+   everything and is 2 minutes. Also confirms the partition name.
+2. **`pip cache purge`** to reclaim ~2.7 GB of the 10 GB home quota (§10.10).
+3. **Fetch the labeled data on Hyak** (§6.2), inside `tmux`. Final line must
+   read `classes present: 1000/1000`.
+4. **200-step smoke test** — proves DDP initialises across cards.
 5. **Measure it/s** and convert 400k steps into real wall-clock hours. Decide
-   step budget from that number, not from the config's aspirational 400k.
+   the step budget from that number, not from the config's aspirational 400k.
 6. **Export the 50k FID reference**, then launch the real run.
 
 ---
@@ -430,6 +436,34 @@ See §6.3.
 **10.9 — `configs/train_unet.yaml`'s header comment says "~280M params"**; the
 measured value is 273.0M. Cosmetic.
 
+**10.10 — `pip install` on Hyak looks hung at "68/73 [torch]". It isn't.**
+torch (526 MB wheel) plus the CUDA libraries unpack ~6 GB of small files onto
+`/mmfs1/gscratch` (GPFS). 5–15 minutes is normal. Interrupting leaves a
+half-written torch. Afterwards run `.venv/bin/pip cache purge` — pip caches
+~2.7 GB of wheels in `~/.cache/pip`, against the 10 GB home quota.
+
+**10.11 — torch 2.13.0 installs a CUDA **13** build** (`nvidia-cudnn-cu13`,
+`nvidia-nccl-cu13`, `cuda-toolkit==13.0.3`, `nvidia-cublas==13.1.1.3`).
+CUDA 13 needs NVIDIA driver r580+. If Hyak's GPU nodes run an older driver,
+torch imports fine on the login node and fails on compute nodes with "CUDA
+driver version is insufficient for CUDA runtime version". **Check before
+queueing anything:**
+
+```bash
+srun -A rao -p gpu-a40 --gpus=1 --time=00:10:00 --pty bash
+nvidia-smi     # driver version
+.venv/bin/python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+```
+
+Fix if it fails: reinstall torch from the cu12 index
+(`--index-url https://download.pytorch.org/whl/cu124`). Status: **unverified as
+of 2026-08-07.**
+
+**10.12 — `launch_hyak.sh:39` does `module load cuda/12.4.1`** while the pip
+torch bundles its own CUDA 13 runtime. The wheels use RPATH so this is usually
+harmless, but the line is now pointless at best and a version-skew risk at
+worst. Drop it once 10.11 is settled.
+
 ---
 
 ## 11. Design decisions already settled — do not relitigate
@@ -493,3 +527,21 @@ as the `[data]` extra; installed both into the local venv. Updated the README's
 data section, which had been telling readers to wait for image-net.org approval.
 
 **2026-08-06** — Measured parameter counts: U-Net 273.0M, DiT-B/4 130.4M.
+
+**2026-08-07** — `git init`, first commit, pushed to the new public repo
+`https://github.com/aaarvs07ranger/epsilon`. GitHub had pre-created an MIT
+LICENSE; rebased onto it rather than force-pushing. Repo is ~13 MB — the 11 GB
+zip, the dmg, and `.venv` are all gitignored. Aarav decided to keep
+`PRIME_LECTURE_NOTES.pdf` and the three MIT lab notebooks public after being
+shown the copyright/course-policy consideration; that was an explicit call, do
+not re-raise it unprompted.
+
+**2026-08-07** — Fetched `data/imagenet64_small` locally (20k images, 235 MB).
+Only 16 classes — it is a class prefix, not a miniature ImageNet. Local smoke
+tests only; the real dataset gets fetched on Hyak directly from HF, never
+transferred from the laptop.
+
+**2026-08-07** — Cloned to `/gscratch/rao/aaravs07/epsilon` on klone and ran
+the venv install. Discovered §10.10 (pip appears hung on torch; it isn't) and
+§10.11 (torch 2.13.0 pulls a CUDA **13** build — driver compatibility on the
+GPU nodes is still unverified and is now the top gating item).
