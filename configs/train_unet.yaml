@@ -1,0 +1,61 @@
+# Epsilon flagship: class-conditional U-Net, ImageNet-1K 64x64, flow matching.
+#
+# This is an ADM-class capacity model (~280M params) trained with the CFM loss
+# on the CondOT path. With 8xA100 (global batch 1024) expect strong samples by
+# ~150k steps and FID(50k) < 12 well before 400k steps; evaluate with
+# scripts/evaluate_fid.py sweeping guidance in [1.0, 2.0].
+
+path:
+  scheduler: condot            # alpha_t = t, beta_t = 1 - t
+
+model:
+  name: unet
+  prediction: velocity         # CFM loss (Eq. 31)
+  num_classes: 1000
+  unet:
+    in_channels: 3
+    model_channels: 192
+    channel_mult: [1, 2, 3, 4]
+    num_res_blocks: 3
+    attention_resolutions: [16, 8]
+    num_heads: 6
+    dropout: 0.1
+    gradient_checkpointing: false
+
+data:
+  name: imagenet64
+  root: data/imagenet64
+  image_size: 64
+  num_workers: 8
+  horizontal_flip: true
+
+training:
+  batch_size: 128              # per GPU; 8 GPUs -> global 1024
+  total_steps: 400000
+  lr: 1.0e-4
+  weight_decay: 0.0
+  warmup_steps: 5000
+  lr_schedule: constant
+  grad_clip: 1.0
+  grad_accum_steps: 1
+  ema_decay: 0.9999
+  cfg_dropout: 0.1             # eta (Algorithm 5)
+  mixed_precision: bf16
+  seed: 0
+
+eval:
+  sample_every: 5000
+  sample_classes: [207, 360, 387, 88, 979, 417, 279, 972]
+  sample_guidance_scale: 4.0
+  sample_steps: 100
+  fid_every: 0                 # enable (e.g. 50000) once fid_reference_dir is set
+  fid_num_samples: 10000
+  fid_reference_dir: null
+
+logging:
+  output_dir: runs/unet64
+  log_every: 100
+  ckpt_every: 10000
+  wandb: true
+  wandb_project: epsilon
+  wandb_run_name: unet64-cfm

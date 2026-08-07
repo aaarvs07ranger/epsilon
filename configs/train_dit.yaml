@@ -1,0 +1,62 @@
+# Class-conditional DiT-B/4 on ImageNet-1K 64x64, flow matching.
+#
+# 64x64 with patch size 4 -> 16x16 = 256 tokens. Scale hidden_size/depth/heads
+# to DiT-L (1024/24/16) once the B/4 baseline is verified; DiT wants longer
+# training than the U-Net for the same FID.
+
+path:
+  scheduler: condot
+
+model:
+  name: dit
+  prediction: velocity
+  num_classes: 1000
+  dit:
+    in_channels: 3
+    input_size: 64
+    patch_size: 4
+    hidden_size: 768
+    depth: 12
+    num_heads: 12
+    mlp_ratio: 4.0
+    dropout: 0.0
+    cross_attention: false     # class-conditional AdaLN only (Remark 29)
+    gradient_checkpointing: false
+
+data:
+  name: imagenet64
+  root: data/imagenet64
+  image_size: 64
+  num_workers: 8
+  horizontal_flip: true
+
+training:
+  batch_size: 128
+  total_steps: 600000
+  lr: 1.0e-4
+  weight_decay: 0.0
+  warmup_steps: 5000
+  lr_schedule: constant
+  grad_clip: 1.0
+  grad_accum_steps: 1
+  ema_decay: 0.9999
+  cfg_dropout: 0.1
+  mixed_precision: bf16
+  seed: 0
+
+eval:
+  sample_every: 5000
+  sample_classes: [207, 360, 387, 88, 979, 417, 279, 972]
+  sample_guidance_scale: 4.0
+  sample_steps: 100
+  fid_every: 0
+  fid_num_samples: 10000
+  fid_reference_dir: null
+
+logging:
+  output_dir: runs/dit64
+  log_every: 100
+  ckpt_every: 10000
+  wandb: true
+  wandb_project: epsilon
+  wandb_run_name: dit64-b4-cfm

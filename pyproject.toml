@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "epsilon"
+version = "0.1.0"
+description = "Epsilon: a from-scratch flow matching / diffusion text-to-image model (MIT 6.S184 mathematics)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Aarav" }]
+dependencies = [
+    "torch>=2.4",
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+train = ["wandb>=0.17", "tqdm>=4.66"]
+data = ["pyarrow>=17.0", "huggingface_hub>=0.25"]
+eval = ["torch-fidelity>=0.3.0", "clean-fid>=0.1.35"]
+web = ["fastapi>=0.111", "uvicorn[standard]>=0.30"]
+text = ["open_clip_torch>=2.24"]
+latent = ["diffusers>=0.30"]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+include = ["eps*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

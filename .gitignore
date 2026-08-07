@@ -1,0 +1,29 @@
+# Environments
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Data — never commit. The ImageNet zip alone is 11.3 GB.
+data/
+eps/data/imagenet64/
+*.zip
+*.npz
+*.u8
+
+# Training artifacts
+runs/
+logs/
+wandb/
+*.pt
+*.ckpt
+samples*.png
+
+# Large files that happen to live in this directory
+*.dmg
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

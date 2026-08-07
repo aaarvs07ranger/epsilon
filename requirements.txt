@@ -1,0 +1,30 @@
+# Core (required everywhere)
+torch>=2.4
+numpy>=1.26
+pyyaml>=6.0
+pillow>=10.0
+
+# Training extras (Hyak)
+wandb>=0.17
+tqdm>=4.66
+
+# Data acquisition (scripts/fetch_imagenet_hf.py: labeled ImageNet-64 from HF)
+pyarrow>=17.0
+huggingface_hub>=0.25
+
+# Evaluation (FID / IS / precision-recall)
+torch-fidelity>=0.3.0
+clean-fid>=0.1.35
+
+# Web demo
+fastapi>=0.111
+uvicorn[standard]>=0.30
+
+# Optional: text conditioning via frozen CLIP text encoder
+# open_clip_torch>=2.24
+
+# Optional: pretrained latent-space VAE for 256/512 scaling
+# diffusers>=0.30
+
+# Dev
+pytest>=8.0

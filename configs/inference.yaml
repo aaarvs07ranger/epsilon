@@ -1,0 +1,14 @@
+# Inference defaults for the web demo and scripts/sample.py.
+# The trained network's own config (stored in the checkpoint) defines the
+# model; this file only sets sampler behaviour.
+
+sampling:
+  method: ode                  # "ode" = flow matching, "sde" = diffusion
+  solver: euler                # "euler" | "heun" (ODE only)
+  parameterization: velocity   # "velocity" | "score" (Proposition 1 conversion)
+  num_steps: 100
+  guidance_scale: 4.0
+  sigma: 1.0                   # SDE diffusion coefficient (Theorem 17)
+  sigma_schedule: constant     # "constant" | "beta" (sigma_t = sigma * beta_t)
+  t_start: 1.0e-4
+  t_end: 0.9999
