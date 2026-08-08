@@ -1,0 +1,84 @@
+# Epsilon on a single Apple-silicon machine (target: M5 Max, 36 GB unified).
+#
+# Written after moving Epsilon OFF Hyak: the rao allocation's /gscratch is 100%
+# full and its 4 GPUs are needed by the NSL project, which has a real deadline.
+# See CLAUDE.md sections 10.14/10.15.
+#
+# Differences from train_rtx6k.yaml, and why:
+#
+#   1. gradient_checkpointing: false. It exists there only to fit 24 GB per
+#      card and costs ~30% compute. 36 GB unified does not need it.
+#   2. mixed_precision: bf16. MPS has no GradScaler, so fp16 would need one and
+#      underflows without it; bf16's fp32 exponent range needs no scaling.
+#      The trainer promotes fp16 -> bf16 on MPS and warns.
+#   3. Global batch 256 (64 x 4 accum), not 1024. On one device, accumulation
+#      buys nothing but wall-clock. Diffusion training is robust to batch size
+#      and LR 1e-4 is, if anything, conservative at 256.
+#   4. num_workers: 2. ImageNet64 holds the whole split in RAM as uint8
+#      (~16 GB for the full 1.28M images). Every forked worker risks
+#      copy-on-write growth against 36 GB shared with the GPU — keep it low,
+#      and note the dataloader is not the bottleneck here anyway.
+#
+# MEASURED BASELINE, so you can sanity-check your own number:
+#   M4 (10-core GPU), batch 32, this model, bf16, WITH grad checkpointing:
+#   0.26 it/s = 8.3 images/s.
+# Expect the M5 Max to land somewhere around 5-12x that. VERIFY IT before
+# trusting total_steps below — run ~200 steps and read the rate.
+#
+# If the measured rate makes 64x64 infeasible, drop data.image_size to 32
+# (and unet.attention_resolutions to [8, 4]) for ~4x less compute per step.
+
+path:
+  scheduler: condot
+
+model:
+  name: unet
+  prediction: velocity
+  num_classes: 1000
+  unet:
+    in_channels: 3
+    model_channels: 128
+    channel_mult: [1, 2, 3, 4]
+    num_res_blocks: 2
+    attention_resolutions: [16, 8]
+    num_heads: 4
+    dropout: 0.1
+    gradient_checkpointing: false
+
+data:
+  name: imagenet64
+  root: data/imagenet64
+  image_size: 64
+  num_workers: 2
+  horizontal_flip: true
+
+training:
+  batch_size: 64                 # 64 x 4 accum = 256 global
+  grad_accum_steps: 4
+  total_steps: 150000            # PLACEHOLDER — reset from measured it/s
+  lr: 1.0e-4
+  weight_decay: 0.0
+  warmup_steps: 5000
+  lr_schedule: constant
+  grad_clip: 1.0
+  ema_decay: 0.9999
+  cfg_dropout: 0.1
+  mixed_precision: bf16
+  seed: 0
+
+eval:
+  sample_every: 5000
+  sample_classes: [207, 360, 387, 88, 979, 417, 279, 972]
+  sample_guidance_scale: 4.0
+  sample_steps: 100
+  fid_every: 0
+  fid_num_samples: 10000
+  fid_reference_dir: null
+
+logging:
+  output_dir: runs/m5
+  log_every: 50
+  ckpt_every: 5000               # no preemption locally; less checkpoint churn
+  wandb: false                   # keep local runs dependency-free
+  wandb_project: epsilon
+  wandb_run_name: m5-unet-cfm
