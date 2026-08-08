@@ -18,7 +18,7 @@
 
 ## 1. Status board
 
-**Last updated: 2026-08-08**
+**Last updated: 2026-08-08 (evening)**
 
 | Area | State |
 |---|---|
@@ -655,3 +655,31 @@ build works on klone's driver; the cu124 fallback in §10.11 is **not** needed.
 Removed the now-pointless `module load cuda/12.4.1` from `launch_hyak.sh`
 (§10.12). Critical path is now: purge pip cache → fetch data on the **login
 node** (compute nodes have no outbound internet) → smoke test → measure it/s.
+
+**2026-08-08** — **Measured Apple-silicon throughput and proposed moving Epsilon
+off Hyak entirely.** Two facts forced this:
+- `/gscratch/rao` is 100% full (§10.15) and the 70 GB there belongs to the NSL
+  project (§10.14), which has a real conference deadline. Epsilon competing for
+  that filesystem and those 4 GPUs actively hurts the higher-priority project.
+- The trainer was silently running **fp32 on MPS** — the AMP block armed
+  autocast only on CUDA. Same class of bug as the Turing bf16 fallthrough found
+  2026-08-07. Fixed: bf16 autocast on MPS (bf16 specifically because MPS has no
+  GradScaler and unscaled fp16 underflows). Verified on an M4.
+
+**Measured, M4 (10-core GPU), 92.5M U-Net, 64x64, batch 32, bf16, gradient
+checkpointing ON: 0.26 it/s = 8.3 images/s.** This is the first real throughput
+number this project has ever had — every earlier estimate was arithmetic.
+
+Extrapolating to the M5 Max (32-core GPU + per-core neural accelerators, and
+no gradient checkpointing needed at 36 GB) gives a **rough 5-12x**, i.e. ~50-90
+images/s — **unverified, and the single most important thing to measure next.**
+At that rate, global batch 256: 100k steps ~ 3-6 days, 150k steps ~ 5-9 days.
+
+Honest comparison: 4x RTX 6000 is probably still **2-4x faster than one M5
+Max**, so this is not a speed win — it is an availability, disk, and
+project-priority win. Added `configs/train_m5.yaml` accordingly.
+
+**FID < 12 remains unfunded by any hardware now in play.** Recommended
+restatement of the target: 92.5M model, 64x64, ~100-150k steps, report the FID
+actually achieved with the compute disclosed. Decision on the final target is
+Aarav's and is not yet made.
