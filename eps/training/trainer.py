@@ -114,10 +114,22 @@ class Trainer:
                         )
             elif mp == "fp16":
                 self.autocast_dtype = torch.float16
+        elif self.device.type == "mps" and mp in ("bf16", "fp16"):
+            # Apple silicon: autocast works, but GradScaler does not support MPS,
+            # so bf16 is the only safe choice — its fp32 exponent range needs no
+            # loss scaling. fp16 without a scaler underflows the small gradients
+            # this loss produces at large t, so promote it rather than obey it.
+            self.autocast_dtype = torch.bfloat16
+            if mp == "fp16" and is_main_process():
+                print(
+                    "[epsilon] mixed_precision=fp16 on MPS needs a GradScaler, "
+                    "which MPS lacks. Using bf16 instead (no scaler required)."
+                )
         elif mp in ("bf16", "fp16") and is_main_process():
             print(f"[epsilon] mixed_precision={mp} ignored on {self.device.type}; using fp32.")
+        # GradScaler is CUDA-only in practice; bf16 and fp32 never need it.
         self.scaler = torch.amp.GradScaler(
-            enabled=self.autocast_dtype == torch.float16
+            enabled=self.device.type == "cuda" and self.autocast_dtype == torch.float16
         )
 
         # Data --------------------------------------------------------------
