@@ -51,8 +51,9 @@ shift || true
 mkdir -p logs
 
 # --- environment -----------------------------------------------------------
-# Hyak provides CUDA via modules; the venv carries torch and the rest.
-module load cuda/12.4.1 2>/dev/null || module load cuda 2>/dev/null || true
+# No `module load cuda` on purpose: the venv's torch wheels bundle their own
+# CUDA 13 runtime and find it via RPATH. Verified working on gpu-rtx6k
+# (Quadro RTX 6000) 2026-08-08. Loading a cuda module here only risks skew.
 
 if [[ ! -d .venv ]]; then
     echo "No .venv here. On the login node, run:"

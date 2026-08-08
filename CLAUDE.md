@@ -18,7 +18,7 @@
 
 ## 1. Status board
 
-**Last updated: 2026-08-07**
+**Last updated: 2026-08-08**
 
 | Area | State |
 |---|---|
@@ -29,7 +29,7 @@
 | **Labeled data** | ✅ **Unblocked 2026-08-06** — see §6 |
 | Git / GitHub | ✅ Public repo `aaarvs07ranger/epsilon`, pushed 2026-08-07 |
 | Hyak clone + venv | 🔄 In progress 2026-08-07 — cloned to `/gscratch/rao/aaravs07/epsilon`, pip install running |
-| GPU / driver compatibility | ⚠️ **Unverified** — torch is a CUDA 13 build, see §10.11 |
+| GPU / driver compatibility | ✅ **Verified 2026-08-08** — CUDA 13 torch works on `gpu-rtx6k`. See §10.11 |
 | Partition name | ✅ **Resolved 2026-08-07**: `gpu-rtx6k` (not gpu-a40). See §7.1 |
 | **Compute scale vs. FID<12 target** | 🔴 **The rao allocation cannot reach the original recipe.** See §7.2 |
 | Dataset on Hyak | ⏳ Not fetched |
@@ -42,15 +42,14 @@ classes** (fish/sharks; `--limit` takes a class prefix, §6.3). Smoke tests only
 
 ### Immediate next actions, in order
 
-1. **Verify GPU + driver** with the `srun` check in §10.11 — this gates
-   everything and is 2 minutes. Confirms CUDA 13 works on these cards.
-2. **`pip cache purge`** to reclaim ~2.7 GB of the 10 GB home quota (§10.10).
-3. **Fetch the labeled data on Hyak** (§6.2), inside `tmux`. Final line must
-   read `classes present: 1000/1000`.
-4. **200-step smoke test** — proves DDP initialises across cards.
-5. **Measure it/s** and convert 400k steps into real wall-clock hours. Decide
+1. **`pip cache purge`** to reclaim ~2.7 GB of the 10 GB home quota (§10.10).
+2. **Fetch the labeled data on Hyak** (§6.2), **on the login node** (compute
+   nodes have no outbound internet), inside `tmux`. Final line must read
+   `classes present: 1000/1000`.
+3. **200-step smoke test** — proves DDP initialises across cards.
+4. **Measure it/s** and convert 400k steps into real wall-clock hours. Decide
    the step budget from that number, not from the config's aspirational 400k.
-6. **Export the 50k FID reference**, then launch the real run.
+5. **Export the 50k FID reference**, then launch the real run.
 
 ---
 
@@ -500,7 +499,7 @@ which is slower than fp32. `trainer.py` now gates on compute capability
 directly, falls back to fp16, and prints a warning. Configs for `gpu-rtx6k`
 should still say `fp16` explicitly.
 
-**10.11 — torch 2.13.0 installs a CUDA **13** build** (`nvidia-cudnn-cu13`,
+**10.11 — ✅ RESOLVED 2026-08-08.** torch 2.13.0 installs a CUDA **13** build (`nvidia-cudnn-cu13`,
 `nvidia-nccl-cu13`, `cuda-toolkit==13.0.3`, `nvidia-cublas==13.1.1.3`).
 CUDA 13 needs NVIDIA driver r580+. If Hyak's GPU nodes run an older driver,
 torch imports fine on the login node and fails on compute nodes with "CUDA
@@ -513,14 +512,15 @@ nvidia-smi     # driver version
 .venv/bin/python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
-Fix if it fails: reinstall torch from the cu12 index
-(`--index-url https://download.pytorch.org/whl/cu124`). Status: **unverified as
-of 2026-08-07.**
+Ran on compute node `g3026`, 2026-08-08: `True Quadro RTX 6000`. The driver is
+new enough for the CUDA 13 runtime; **no cu124 reinstall is needed.** Kept here
+because it is the first thing to re-check if torch is ever reinstalled or the
+partition changes — the failure mode is invisible on the login node.
 
-**10.12 — `launch_hyak.sh:39` does `module load cuda/12.4.1`** while the pip
-torch bundles its own CUDA 13 runtime. The wheels use RPATH so this is usually
-harmless, but the line is now pointless at best and a version-skew risk at
-worst. Drop it once 10.11 is settled.
+**10.12 — ✅ FIXED 2026-08-08.** `launch_hyak.sh` used to `module load
+cuda/12.4.1` while the pip torch bundles its own CUDA 13 runtime. Now that
+10.11 is settled the line is gone: the venv's wheels carry their CUDA via
+RPATH, so no `module load cuda` is wanted at all. Do not re-add one.
 
 ---
 
@@ -622,3 +622,11 @@ Consequences worked through in §7.1/§7.2 and acted on:
 
 **2026-08-07** — Fixed §10.4, the web demo's shared-config race, by threading
 `solver` and `sigma` through `sample_batch` as per-request overrides.
+
+**2026-08-08** — **GPU + driver verified**, closing the top gating item.
+`srun` onto `gpu-rtx6k` (node `g3026`) →
+`torch.cuda.is_available() == True`, device `Quadro RTX 6000`. The CUDA 13
+build works on klone's driver; the cu124 fallback in §10.11 is **not** needed.
+Removed the now-pointless `module load cuda/12.4.1` from `launch_hyak.sh`
+(§10.12). Critical path is now: purge pip cache → fetch data on the **login
+node** (compute nodes have no outbound internet) → smoke test → measure it/s.
