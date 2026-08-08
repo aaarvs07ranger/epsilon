@@ -491,6 +491,26 @@ torch (526 MB wheel) plus the CUDA libraries unpack ~6 GB of small files onto
 half-written torch. Afterwards run `.venv/bin/pip cache purge` — pip caches
 ~2.7 GB of wheels in `~/.cache/pip`, against the 10 GB home quota.
 
+**10.14 — 🚫 DO NOT DELETE ANYTHING UNDER `/gscratch/rao/aaravs07` TO FREE
+SPACE.** As of 2026-08-08 that path holds ~70 GB / 164k files, and most of it
+belongs to a **separate, active research project of Aarav's** — not Epsilon.
+Aarav said explicitly on 2026-08-08 not to touch it. Epsilon's disk problems
+are to be solved by putting Epsilon's data *elsewhere* (see §10.15), never by
+reclaiming that 70 GB. Do not propose it again.
+
+**10.15 — `/gscratch/rao` is 100% FULL** (4077 / 4096 GB group-wide,
+`hyakstorage`, 2026-08-08). Roughly 19 GB of headroom exists for the entire rao
+group, which is why the data fetch died with `OSError: [Errno 122] Disk quota
+exceeded` at 1.12M / 1.28M images. Note this also means Aarav's *other* project
+cannot write to /gscratch/rao right now either.
+
+The fetcher's peak requirement is **~2x the dataset size** — it writes a
+~16 GB flat scratch file, then reads it back permuted into ~16 GB of npz
+shards, so ~32 GB at peak. Neither the 32 GB peak nor the 16 GB result fits in
+19 GB. Home (10 GB) is far too small. `/gscratch/cse` has ~3.5 TB free but the
+access email says do not use it. Resolution in progress — see the 2026-08-08
+log entry.
+
 **10.13 — Quadro RTX 6000 is Turing (sm_75) and has NO bf16 tensor cores.**
 Before 2026-08-07 the trainer silently ran **fp32** when `mixed_precision=bf16`
 was set on such a card (the `elif` only caught an explicit `fp16`), and newer
