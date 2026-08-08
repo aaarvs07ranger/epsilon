@@ -22,34 +22,50 @@
 
 | Area | State |
 |---|---|
-| Math core (`paths`, `losses`, samplers) | ✅ Complete, 66 tests pass (~1.6 s) |
-| Models (U-Net 273.0M, DiT-B/4 130.4M) | ✅ Complete, verified on `meta` device |
-| Trainer (DDP, EMA, AMP, ckpt, resume) | ✅ Complete, smoke-tested locally on MPS |
+| Math core (`paths`, `losses`, samplers) | ✅ Complete, 66 tests pass (~1.8 s) |
+| Models (U-Net 273.0M, DiT-B/4 130.4M, 92.5M small) | ✅ Complete, verified on `meta` device |
+| Trainer (DDP, EMA, AMP, ckpt, resume) | ✅ Complete; AMP now correct on CUDA **and** MPS |
 | Web demo (FastAPI + SPA) | ✅ Complete, loads without a checkpoint |
-| **Labeled data** | ✅ **Unblocked 2026-08-06** — see §6 |
-| Git / GitHub | ✅ Public repo `aaarvs07ranger/epsilon`, pushed 2026-08-07 |
-| Hyak clone + venv | 🔄 In progress 2026-08-07 — cloned to `/gscratch/rao/aaravs07/epsilon`, pip install running |
-| GPU / driver compatibility | ✅ **Verified 2026-08-08** — CUDA 13 torch works on `gpu-rtx6k`. See §10.11 |
-| Partition name | ✅ **Resolved 2026-08-07**: `gpu-rtx6k` (not gpu-a40). See §7.1 |
-| **Compute scale vs. FID<12 target** | 🔴 **The rao allocation cannot reach the original recipe.** See §7.2 |
-| Dataset on Hyak | ⏳ Not fetched |
+| **Labeled data** | ✅ Source unblocked 2026-08-06 (§6); **not yet fetched anywhere** |
+| Git / GitHub | ✅ Public repo `aaarvs07ranger/epsilon` |
+| **Execution venue** | 🔀 **CHANGED 2026-08-08: moving off Hyak to a single M5 Max.** See §7.0 |
+| Hyak (rao) | ⛔ **Abandoned for Epsilon** — `/gscratch` 100% full (§10.15), GPUs needed by NSL (§10.14) |
+| Measured throughput | ✅ **M4: 0.26 it/s @ batch 32 = 8.3 img/s** (§7.0). M5 Max: ⏳ unmeasured |
+| **FID < 12 target** | 🔴 **Unfunded by any hardware in play.** Needs honest restatement — §7.2 |
+| Dataset fetched | ⏳ Not done (do it on the M5 Max — ~700 GB free, no quota) |
 | Real training run | ⏳ Not started |
 | FID reference set | ⏳ Not exported |
-| Public demo deployment | ⏳ Not started |
+| Public demo deployment | ⏳ Not started — **can ship before training finishes** (§9) |
 
 Local-only convenience: `data/imagenet64_small` — 20k images but **only 16
 classes** (fish/sharks; `--limit` takes a class prefix, §6.3). Smoke tests only.
 
 ### Immediate next actions, in order
 
-1. **`pip cache purge`** to reclaim ~2.7 GB of the 10 GB home quota (§10.10).
-2. **Fetch the labeled data on Hyak** (§6.2), **on the login node** (compute
-   nodes have no outbound internet), inside `tmux`. Final line must read
-   `classes present: 1000/1000`.
-3. **200-step smoke test** — proves DDP initialises across cards.
-4. **Measure it/s** and convert 400k steps into real wall-clock hours. Decide
-   the step budget from that number, not from the config's aspirational 400k.
-5. **Export the 50k FID reference**, then launch the real run.
+**Blocked until ~2026-08-09/10, when Aarav is home with the M5 Max.** Nothing
+useful remains to be done on Hyak; do not restart that path.
+
+0. **On the laptop, now:** `git push` so the M5 Max can clone. (Done 2026-08-08.)
+1. **Clean Epsilon off Hyak** — §7.0 has the exact commands. Frees ~6 GB for NSL.
+   *Only* `/gscratch/rao/aaravs07/epsilon`. **Never touch `.../nsl` (§10.14).**
+2. **M5 Max setup:** clone → venv → `pip install -e ".[data,web]"` →
+   `pytest -q` (expect 66 passed).
+3. **MEASURE IT/S FIRST — 200 steps, ~10 min.** This is the one number the
+   whole plan hangs on and it has never been measured on the real machine:
+   ```
+   python scripts/train.py --config configs/train_m5.yaml \
+       data.root=data/imagenet64_small data.max_samples=4096 \
+       training.total_steps=200 logging.output_dir=/tmp/bench
+   ```
+   Multiply by 256 (the global batch) for images/s. Set `total_steps` from
+   this, not from the config's placeholder 150000.
+4. **Fetch the full dataset** (§6.2) — ~32 GB peak, trivial locally.
+5. **Deploy the web demo immediately**, without a checkpoint (§9). Decouples
+   "live" from "trained" and gets a public URL on day one.
+6. **Launch training** detached under `caffeinate -is nohup` (§7.0). Use
+   `eval.sample_every=1000` on the first run — the default 5000 is ~5 h
+   between preview grids at these rates.
+7. **Export the 50k FID reference**, evaluate EMA weights, report honestly.
 
 ---
 
@@ -288,6 +304,79 @@ quota; a handful of shards is a few sequential reads.
 ---
 
 ## 7. Training
+
+### 7.0 Execution venue: a single M5 Max, not Hyak (decided 2026-08-08)
+
+**Epsilon no longer runs on Hyak.** Two independent reasons, either sufficient:
+
+1. `/gscratch/rao` is **100% full** (4077/4096 GB group-wide) — §10.15. The
+   data fetch died at 1.12M/1.28M images with `Errno 122 Disk quota exceeded`.
+2. The rao allocation's 4 GPUs and its remaining disk are needed by the **NSL
+   project** (§10.14), which has a conference deadline. Epsilon is the side
+   project. Contending for that filesystem actively costs Aarav his paper.
+
+Hardware: **M5 Max MacBook Pro, 18-core CPU / 32-core GPU / 36 GB unified**,
+inherited ~2026-07-31. The M4 (10-core GPU, 32 GB, ~700 GB free) stays as the
+dev/smoke machine — it is what these notes were written on.
+
+**This is not a speed win, and the notes should not pretend otherwise.** Best
+estimate is that 4× RTX 6000 is still **2–4× faster** than one M5 Max. The win
+is availability (no queue, no 2FA, no preemption), disk (~700 GB vs 19 GB), and
+not stealing resources from the higher-priority project.
+
+#### Measured throughput — the project's first real number
+
+| Machine | Config | Rate |
+|---|---|---|
+| **M4, 10-core GPU** | 92.5M U-Net, 64×64, batch 32, bf16, grad-ckpt ON | **0.26 it/s = 8.3 img/s** |
+| M5 Max, 32-core GPU | same model, grad-ckpt OFF | **UNMEASURED — do this first** |
+
+Rough extrapolation for the M5 Max is 5–12× the M4 (3.2× the GPU cores, plus
+per-core neural accelerators, plus ~1.35× from dropping gradient checkpointing)
+→ ~50–90 img/s. At global batch 256 that is roughly:
+
+| Steps | Est. wall-clock |
+|---|---|
+| 50k | 1.5–3 days |
+| 100k | 3–6 days |
+| 150k | 5–9 days |
+
+**Treat every one of those numbers as unfunded until step 3 of §1 is done.**
+The whole point of the 2026-08-07 lesson is to stop planning from arithmetic.
+
+#### Running it
+
+`configs/train_m5.yaml` — 92.5M params, bf16, **no** gradient checkpointing
+(that exists only to fit 24 GB and costs ~30% compute), global batch 256 via
+64 × 4 accumulation, `num_workers: 2` because `ImageNet64` holds the whole
+split in RAM as uint8 (~16 GB) against 36 GB shared with the GPU.
+
+```bash
+caffeinate -is nohup ./.venv/bin/python scripts/train.py \
+    --config configs/train_m5.yaml > runs/train.log 2>&1 &
+```
+
+`caffeinate -is` is not optional — the run dies with the display otherwise.
+
+If the measured rate makes 64×64 infeasible, `data.image_size=32` (and
+`attention_resolutions=[8,4]`) is ~4× less compute per step; the codebase is
+resolution-agnostic.
+
+#### Cleaning Epsilon off Hyak
+
+Epsilon's entire Hyak footprint is `/gscratch/rao/aaravs07/epsilon` — the repo
+(~13 MB) plus a ~6 GB venv. The HF parquet cache cleaned itself up as it went
+(the fetcher unlinks each shard after decoding), and home shows 0/10 GB.
+
+```bash
+du -sh /gscratch/rao/aaravs07/epsilon          # look before you delete
+rm -rf /gscratch/rao/aaravs07/epsilon          # exact path, no wildcard
+```
+
+🚫 **`/gscratch/rao/aaravs07/nsl` is a different project and must never be
+touched.** Never use a wildcard under `/gscratch/rao/aaravs07/`.
+
+---
 
 ### Local (MacBook, MPS) — development scale only
 
@@ -683,3 +772,16 @@ project-priority win. Added `configs/train_m5.yaml` accordingly.
 restatement of the target: 92.5M model, 64x64, ~100-150k steps, report the FID
 actually achieved with the compute disclosed. Decision on the final target is
 Aarav's and is not yet made.
+
+**2026-08-08 (evening)** — **Execution venue changed: Epsilon leaves Hyak.**
+Decided with Aarav after the disk failure and the throughput measurement.
+Actions taken: added `configs/train_m5.yaml`; rewrote §1 and added §7.0; agreed
+Epsilon's Hyak tree gets deleted to give the ~6 GB back to NSL. Aarav is home
+with the M5 Max ~2026-08-09/10; everything is blocked until then, and the first
+thing to do on that machine is **measure it/s**, not launch a run.
+
+Standing correction to earlier sessions: the repeated pattern in this project
+has been *planning from arithmetic and being wrong* — `gpu-a40` guessed from a
+group name, "400k steps" carried for weeks, bf16 assumed on Turing, autocast
+assumed on MPS, ~19 GB of free disk assumed on a 4 TB filesystem. Every one was
+caught only by running something. Measure first.
