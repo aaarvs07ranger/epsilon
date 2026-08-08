@@ -493,7 +493,12 @@ half-written torch. Afterwards run `.venv/bin/pip cache purge` — pip caches
 
 **10.14 — 🚫 DO NOT DELETE ANYTHING UNDER `/gscratch/rao/aaravs07` TO FREE
 SPACE.** As of 2026-08-08 that path holds ~70 GB / 164k files, and most of it
-belongs to a **separate, active research project of Aarav's** — not Epsilon.
+belongs to a **separate, active research project of Aarav's** — not Epsilon:
+`/gscratch/rao/aaravs07/nsl`, the Neural Systems Lab ProcTHOR zero-shot-transfer
+benchmark (PI Rajesh Rao, mentor Vishwas Sathish), which is targeting a LEAP @
+CoRL 2026 workshop deadline. That tree holds its replay buffers, per-seed result
+trees, and checkpoints. It is the **higher-priority** project of the two;
+Epsilon is the side project.
 Aarav said explicitly on 2026-08-08 not to touch it. Epsilon's disk problems
 are to be solved by putting Epsilon's data *elsewhere* (see §10.15), never by
 reclaiming that 70 GB. Do not propose it again.
