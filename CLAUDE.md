@@ -89,7 +89,15 @@ https://claude.ai/code/artifact/36b232f5-b663-4628-9ba7-e26a8743221b
 Built as a zoom ladder (1× / 10× / 100× / 1000×) then eleven sections: repo map,
 math core, both networks, training, sampling, data, evaluation, demo, runbook,
 glossary. Colour convention in all its diagrams: **teal = noise / t=0**,
-**amber = data / t=1**. Section 10 holds the exact runbook commands.
+**amber = data / t=1**. Section 10 holds the runbook commands.
+
+⚠️ **The artifact is now STALE as of 2026-08-10 and needs a revision pass.**
+Read 2026-08-08's decisions before quoting it. Specifically wrong: its whole
+Hyak section (abandoned, §7.0); `--partition=gpu-a40` (never existed, §7.1);
+"request the labeled ImageNet download from image-net.org, do this first" (the
+HF repack replaced it, §6.2); `mixed_precision=none` for local runs (bf16 works
+on MPS now); and the FID<12 / 273M framing (§7.2). The math sections 01-09 are
+still accurate — the rot is confined to the runbook and the plan.
 
 ---
 
