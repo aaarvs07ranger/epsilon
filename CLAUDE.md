@@ -580,6 +580,17 @@ torch (526 MB wheel) plus the CUDA libraries unpack ~6 GB of small files onto
 half-written torch. Afterwards run `.venv/bin/pip cache purge` — pip caches
 ~2.7 GB of wheels in `~/.cache/pip`, against the 10 GB home quota.
 
+**10.16 — `hyakstorage` output is a cached report, not live.** After deleting
+Epsilon's ~6 GB tree on 2026-08-10 it still showed an unchanged `70GB /
+164250 files`, byte- and file-identical to before — the tell that it is stale,
+since removing a venv deletes tens of thousands of files. Use
+`du -sh /gscratch/rao/aaravs07/` for live usage; `hyakstorage` catches up on its
+own schedule. Do not conclude a delete failed from an unchanged quota report.
+
+**2026-08-10: Epsilon's Hyak tree is deleted.** `/gscratch/rao/aaravs07/` now
+holds only `conda-envs`, `miniforge3`, and `nsl` — all NSL infrastructure, all
+off limits (§10.14).
+
 **10.14 — 🚫 DO NOT DELETE ANYTHING UNDER `/gscratch/rao/aaravs07` TO FREE
 SPACE.** As of 2026-08-08 that path holds ~70 GB / 164k files, and most of it
 belongs to a **separate, active research project of Aarav's** — not Epsilon:
