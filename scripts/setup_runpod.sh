@@ -61,6 +61,17 @@ echo "Free under $WORK: ${AVAIL} GB"
 # ------------------------------------------------------------------ install --
 say "Fetching the repo"
 mkdir -p "$WORK"
+
+# Keep every cache on the PERSISTENT volume, not the container disk. $HOME is
+# /root, which lives on the (smaller, ephemeral) container disk — the same
+# class of mistake as Hyak's 10 GB home quota, which launch_hyak.sh solves the
+# same way. The HF cache self-cleans as it decodes (the fetcher unlinks each
+# parquet), so this is insurance rather than a hard requirement, but it also
+# means the caches survive a pod stop/start.
+export HF_HOME="$WORK/.cache/huggingface"
+export TORCH_HOME="$WORK/.cache/torch"
+export PIP_CACHE_DIR="$WORK/.cache/pip"
+mkdir -p "$HF_HOME" "$TORCH_HOME" "$PIP_CACHE_DIR"
 if [ -d "$DIR/.git" ]; then git -C "$DIR" pull --ff-only; else git clone "$REPO" "$DIR"; fi
 cd "$DIR"
 
