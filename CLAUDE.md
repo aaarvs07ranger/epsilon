@@ -18,67 +18,85 @@
 
 ## 1. Status board
 
-**Last updated: 2026-08-11**
+**Last updated: 2026-08-11, ~15:05 pod-time (22:05 PT) — training in flight on RunPod.**
 
 | Area | State |
 |---|---|
-| Math core (`paths`, `losses`, samplers) | ✅ Complete, 66 tests pass (~4.7 s on M5 Max) |
+| Math core (`paths`, `losses`, samplers) | ✅ Complete, 66 tests pass (4.7 s M5 Max / 5.7 s RunPod) |
 | Models (U-Net 273.0M, DiT-B/4 130.4M, 92.5M small) | ✅ Complete, verified on `meta` device |
-| Trainer (DDP, EMA, AMP, ckpt, resume) | ✅ Complete; AMP correct on CUDA **and** MPS; `_preview` now exception-guarded (2026-08-11) |
-| `eps/data/` package | ✅ **Reconstructed 2026-08-11** — had never been committed (§10.17) |
+| Trainer (DDP, EMA, AMP, ckpt, resume) | ✅ Single-GPU path proven on CUDA + MPS; `_preview` guarded. **DDP still never executed** |
+| `eps/data/` package | ✅ **Reconstructed + pushed 2026-08-11** — had never been committed (§10.17) |
 | Web demo (FastAPI + SPA) | ✅ Complete, loads without a checkpoint |
-| **Labeled data** | ✅ Source unblocked 2026-08-06 (§6); **fetched on the M5 Max 2026-08-11** |
-| Git / GitHub | ⚠️ Public repo `aaarvs07ranger/epsilon` — **2026-08-11's work is uncommitted in the working tree**, see actions below |
-| **Execution venue** | 🔀 **CHANGED 2026-08-11 (later): moving to rented RunPod GPUs.** M5 Max works but is ~5.5 days/run — see §7.3 |
-| Hyak (rao) | ⛔ **Abandoned for Epsilon** — `/gscratch` 100% full (§10.15), GPUs needed by NSL (§10.14) |
-| Measured throughput | ✅ **M5 Max: 0.20 it/s = 51 img/s** as configured (§7.0). M4: 8.3 img/s |
-| **FID < 12 target** | 🔴 **Still unfunded.** Now quantified — §7.2. Needs Aarav's call |
-| Dataset fetched | ✅ Full 1.28M train split on the M5 Max (§6.2) |
-| Real training run | ⏸️ **M5 Max run stopped at step 5,100/100,000** (5.3 h, loss 1.29→0.167, no errors). Artifacts kept in `runs/m5` (4.2 GB: ckpt 2500/5000, 5 previews). Superseded by §7.3 |
-| **U-Net vs DiT comparison** | 🎯 **This is the plan now** — `configs/train_cloud_{unet,dit}.yaml`, verified controlled (§7.3) |
-| FID reference set | ⏳ Not exported — can be done while training runs |
-| Public demo deployment | ⏳ Not started — **can ship before training finishes** (§9) |
+| Git / GitHub | ⚠️ `eps/data/` **is** pushed (repo finally runnable from a clone). **2 local commits unpushed** — see actions |
+| **Execution venue** | ▶️ **RunPod, 2× RTX PRO 6000 Blackwell** — live now (§7.4) |
+| M5 Max | ⏸️ Local run stopped at step 5,100 (loss 1.29→0.167). Artifacts in `runs/m5` (4.2 GB). Still the dev box |
+| Hyak (rao) | ⛔ Abandoned (§10.14/§10.15) |
+| Measured throughput | ✅ **RunPod: U-Net 1.64 it/s, DiT 3.20 it/s.** M5 Max 0.21. **DiT is 2× faster than the smaller U-Net** (§7.4) |
+| Dataset | ✅ Full 1,281,167 train + 50,000 val fetched **on the pod**, 1000/1000 classes, shuffle verified |
+| **Training run** | ▶️ **IN FLIGHT.** U-Net → 60k steps (~10 h), DiT → 100k (~8 h). Started ~14:57 / 14:32 pod-time |
+| **FID < 12 target** | 🔴 Dead. Not reachable at any tier in play — §7.2. Restate honestly |
+| FID reference set | ⏳ Exported by `eval_compare.sh` at the end (val split, §8) |
+| Public demo deployment | ⏳ Not started — can ship before training finishes (§9) |
 
 Local-only convenience: `data/imagenet64_small` — 20k images but **only 16
 classes** (fish/sharks; `--limit` takes a class prefix, §6.3). Smoke tests only.
 Re-fetched on the M5 Max 2026-08-11.
 
-### Immediate next actions, in order
+### Immediate next actions — the morning-after runbook
 
-The code is fixed, the data is local, throughput is measured, and the plan is
-settled (§7.3: RunPod, two single-GPU arms, U-Net vs DiT). The local M5 Max run
-was stopped at step 5,100 in favour of that. **One thing gates everything: the
-push in item 1.**
+**Both arms are training right now on the pod (§7.4).** Nothing to do until
+they finish. Aarav is away until the morning of 2026-08-12. Expected completion:
+DiT ~22:40 PT, U-Net ~01:00 PT, i.e. both done well before morning.
 
-1. **`git push origin main` — committed locally, NOT pushed.** This machine has
-   no GitHub credentials (no `gh`, no SSH key, nothing in the keychain), so the
-   push has to be done by hand:
+**Check progress from the laptop, any time, one line** (note `-n 2`, not `-2` —
+§10.20):
+
+```bash
+ssh -p 27225 -i ~/.ssh/id_ed25519 root@82.221.170.234 \
+  "tail -n 2 /workspace/epsilon/runs/unet.log /workspace/epsilon/runs/dit.log"
+```
+
+Then, in order:
+
+1. **Confirm both finished.** Targets: U-Net **60000**, DiT **100000**. Both
+   stop by themselves — `total_steps` is set, no babysitting needed.
+2. **Run the evaluation** (~2.5 h, §8). The `DIT=` override is what keeps the
+   comparison matched — it evaluates DiT at the same 60k steps the U-Net
+   reached, instead of its 100k checkpoint:
    ```bash
-   cd ~/Desktop/epsilon && git push origin main     # asks for a PAT, not a password
-   # or, once: brew install gh && gh auth login
+   ssh -p 27225 -i ~/.ssh/id_ed25519 root@82.221.170.234
+   cd /workspace/epsilon
+   DIT=runs/cloud_dit/ckpt_0060000.pt bash scripts/eval_compare.sh
    ```
-   **Nothing on the cloud path works until this lands** — `setup_runpod.sh`
-   clones `main`, and without `eps/data/` a fresh clone cannot even import
-   (§10.17). The script hard-fails early with that exact message rather than
-   wasting 25 minutes on the data fetch first. Sanity check afterwards:
+3. **Download everything, then terminate the pod.** ⛔ The volume is deleted
+   with the pod — this is the only step where work can actually be lost. From
+   a *laptop* terminal, not the SSH session:
    ```bash
-   git clone https://github.com/aaarvs07ranger/epsilon /tmp/clonecheck \
-     && cd /tmp/clonecheck && python -m pytest -q   # the check that would have caught 10.17
+   cd ~/Desktop
+   scp -P 27225 -i ~/.ssh/id_ed25519 -r \
+       root@82.221.170.234:/workspace/epsilon/results .
+   scp -P 27225 -i ~/.ssh/id_ed25519 \
+       root@82.221.170.234:/workspace/epsilon/runs/cloud_unet/ckpt_latest.pt unet.pt
+   scp -P 27225 -i ~/.ssh/id_ed25519 \
+       root@82.221.170.234:/workspace/epsilon/runs/cloud_dit/ckpt_latest.pt dit.pt
+   # worth grabbing too: the DiT@100k bonus checkpoint and all preview grids
+   scp -P 27225 -i ~/.ssh/id_ed25519 -r \
+       root@82.221.170.234:/workspace/epsilon/runs/cloud_unet/previews unet_previews
+   scp -P 27225 -i ~/.ssh/id_ed25519 -r \
+       root@82.221.170.234:/workspace/epsilon/runs/cloud_dit/previews dit_previews
    ```
-2. **`bash scripts/setup_runpod.sh`** on a 2-GPU RunPod box (§7.3). ~6 h,
-   ~$40, both arms. **Check `it/s` in the first two minutes** — under ~2 it/s
-   on an H100 means something is wrong; catch it then, not $40 later.
-3. **`bash scripts/eval_compare.sh`** when they finish → `results/fid.md` plus
-   sample grids. *Then* decide whether a larger tier (§7.3) is worth it —
-   **from the data**, which is the whole lesson of this project.
-4. **Deploy the web demo** (§9) — ZeroGPU on HF Spaces, and label the UI as
-   1000 ImageNet classes (§11: it is not text-to-image). Can ship before the
-   runs finish; `/api/generate` just returns 503 until a checkpoint exists.
-5. **Restate the target honestly** (§7.2). "FID < 12" is not among the options
-   at any tier now in play. Report the FID actually achieved with the compute
-   disclosed, plus the §6.4 repack caveat.
-6. **Revise the explainer artifact** (§2) — its runbook has been stale since
-   2026-08-08 and everything from 2026-08-11 adds to that.
+   Then RunPod dashboard → pod → **⋮ → Terminate** (not Stop — a stopped pod
+   still bills for storage).
+4. **`git push origin main`** — 2 commits still local (`3187354` curl
+   bootstrap, `77f4f68` cache pinning), plus whatever this session adds. An
+   SSH key now exists at `~/.ssh/id_ed25519`; add it to GitHub and use
+   `git remote set-url origin git@github.com:aaarvs07ranger/epsilon.git`.
+5. **Deploy the web demo** (§9) — ZeroGPU on HF Spaces, UI labelled as 1000
+   ImageNet classes (§11: it is not text-to-image).
+6. **Restate the target honestly** (§7.2) and write up the results with the
+   §6.4 repack caveat and the compute disclosed.
+7. **Revise the explainer artifact** (§2) — stale since 2026-08-08, and
+   everything from 2026-08-11 adds to it.
 
 ---
 
@@ -116,8 +134,15 @@ still accurate — the rot is confined to the runbook and the plan.
 
 ## 3. Environment
 
-**Two machines.** The M5 Max is now the training machine (§7.0); the M4 remains
-the dev/smoke box and is where everything before 2026-08-11 was measured.
+**Three machines now.** Training moved to **rented RunPod GPUs** on 2026-08-11
+(§7.4) — 2× RTX PRO 6000 Blackwell, torch 2.8.0+cu128, driver 570, Ubuntu
+24.04, reached at `ssh root@82.221.170.234 -p 27225 -i ~/.ssh/id_ed25519`.
+The M5 Max below is now the local dev box (it *can* train, at ~5.5 days/run);
+the M4 is where everything before 2026-08-11 was measured.
+
+An SSH keypair was created at `~/.ssh/id_ed25519` on 2026-08-11 — there was
+none before, which is why HTTPS `git push` failed with "could not read
+Username". The same key works for RunPod and GitHub.
 
 | | M5 Max — training | M4 — dev |
 |---|---|---|
@@ -350,6 +375,21 @@ quota; a handful of shards is a few sequential reads.
 
 ## 7. Training
 
+> **Read this first — the subsections are NOT in numerical order in this file,
+> they are in chronological order of the venue changes.** Where to look:
+>
+> | If you want | Go to | Status |
+> |---|---|---|
+> | **What is running right now, and the numbers it is running at** | **§7.4** | ✅ current |
+> | How the cloud run is set up and why no DDP | §7.3 | ✅ current |
+> | Apple-silicon throughput and the local config | §7.0 | dev box only |
+> | Why FID < 12 is dead, with the arithmetic | §7.2 | ✅ current |
+> | The Hyak allocation | §7.1 | ⛔ historical |
+>
+> Venue history: Hyak → M5 Max (2026-08-08) → RunPod (2026-08-11). Sections
+> from dead venues are kept because they explain the decisions, not because
+> anyone should act on them.
+
 ### 7.0 Execution venue: a single M5 Max, not Hyak (decided 2026-08-08)
 
 **Epsilon no longer runs on Hyak.** Two independent reasons, either sufficient:
@@ -530,6 +570,65 @@ value on macOS is fatal — see §10.18 before copying it anywhere local.
 log. Multiply by 256 for images/s. Under ~2 it/s on an H100 means something is
 wrong (oversubscribed host, throttling, starved dataloader) — catch it then,
 not six hours and $40 later.
+
+### 7.4 The live RunPod run — measured 2026-08-11
+
+**Pod.** `prime_genai_epsilon`, id `x850wa2dgcc0aj`, Secure Cloud, On-Demand.
+2× **NVIDIA RTX PRO 6000 Blackwell Server Edition** (sm_120, 97,887 MiB each,
+native bf16), 16 vCPU, **$4.20/hr**. 100 GB volume at `/workspace`, 30 GB
+container disk (ample — all caches are pinned to the volume). Ubuntu 24.04,
+driver **570.195.03**, container torch **2.8.0+cu128** (reused, not reinstalled
+— §7.3). SSH: `ssh root@82.221.170.234 -p 27225 -i ~/.ssh/id_ed25519`
+(the "SSH over exposed TCP" endpoint — the other one does not support SCP).
+
+Setup went clean end to end: 66 tests passed, full fetch (1,281,167 train +
+50,000 val, **1000/1000 classes**), 50k-prefix diversity check passed. Data
+fetch took ~25 min as predicted.
+
+#### Measured throughput — and a genuinely surprising result
+
+| Arm | Params | Rate | images/s | vs M5 Max |
+|---|---|---|---|---|
+| U-Net | 92.5M | **1.64 it/s** | 420 | 7.8× |
+| DiT-B/4 | 130.4M | **3.20 it/s** | 819 | ~15× |
+
+**The bigger model is 2× faster.** DiT-B/4 has 41% more parameters and trains
+at double the U-Net's rate. This is not a bug: DiT is dense matmuls that
+saturate tensor cores, whereas the U-Net at 64×64 with 128 base channels is
+many small convolutions, GroupNorm, and attention at 16×16/8×8 — low arithmetic
+intensity per kernel. On a fast GPU the U-Net simply cannot feed the machine.
+Worth reporting in the writeup; it is a real, measured architectural finding
+and it inverts the naive parameter-count intuition.
+
+⚠️ **A hypothesis that was tested and REJECTED — do not retry it.** The obvious
+read of the above is "the U-Net is kernel-launch-bound, so give it a bigger
+micro-batch." That was tried: batch 128×2-accum → **1.63 it/s**, batch 256×1 →
+**1.64 it/s**. *No change.* `nvidia-smi` showed 100% utilisation and 504W/600W
+at both settings — it is genuinely compute-bound, not launch-bound. Memory sat
+at 27.9 GB (batch 128) / 53.9 GB (batch 256) of 97.9 GB, so there was plenty of
+headroom; the headroom simply was not the constraint. Note this is the *reverse*
+of the M5 Max finding (§7.0), where bigger batches were slower for memory
+reasons. Different machine, different regime, and neither generalises.
+
+#### The scope cut this forced
+
+At 1.64 it/s the U-Net needs **17 h** for 100k steps — over both the 12-hour
+window Aarav wanted and the $60 budget (~$71 for the pod alone). Decision:
+
+| Arm | Steps | Wall-clock | Why |
+|---|---|---|---|
+| U-Net | **60,000** | ~10.1 h | Largest count that fits 12 h at 1.64 it/s |
+| DiT | 100,000 | ~8.2 h | Already fast; no reason to cut it |
+
+15.4M images ≈ 12 epochs for the U-Net. **The comparison stays matched for
+free**: checkpoints save every 10k, so the head-to-head is U-Net@60k vs DiT's
+`ckpt_0060000.pt`, with DiT@100k as a bonus data point. Nothing is wasted.
+
+The U-Net was relaunched with `training.total_steps=60000` so it stops on its
+own — no babysitting, and no risk of burning credits overnight.
+
+Cost tracking: $60.00 start → $57.75 after setup → projected **~$53 total**
+(10.1 h training + ~2.5 h eval at $4.20/hr). Aarav topped up ~$15 for margin.
 
 #### Cleaning Epsilon off Hyak
 
@@ -748,8 +847,17 @@ permutation, and 50k images is exactly the reference size. Note that FID
 against a *validation*-derived reference is a slightly different quantity than
 against a train-derived one — pick one and say which in the writeup.
 
-Report the **50k** number. In-training FID is available via `eval.fid_every`
-and `eval.fid_reference_dir` (heavy; off by default). `_fid()` in the trainer
+**Budget ~2.5 h for the full sweep**, not the ~45 min originally guessed here.
+`scripts/eval_compare.sh` runs 6 evaluations (2 models × 3 guidance values) ×
+10k samples × 100 ODE steps, and CFG doubles the function evaluations per step.
+On 2× RTX PRO 6000 that is roughly 80 min for the U-Net arm and 40 for the DiT,
+plus reference export and Inception feature extraction. `NUM=5000` halves it;
+FID is biased at low sample counts but both arms get identical treatment, so
+the *comparison* stays valid as long as the count is disclosed.
+
+Report the **50k** number if you can afford it, **10k** is the usual ablation
+size. In-training FID is available via `eval.fid_every` and
+`eval.fid_reference_dir` (heavy; off by default). `_fid()` in the trainer
 swallows exceptions by design — FID must never kill a long run, and as of
 2026-08-11 `_preview()` is guarded the same way.
 
@@ -969,6 +1077,40 @@ Note the *old* comment in that config justified `num_workers: 2` by reasoning
 about "forked worker copy-on-write growth" — correct reasoning for Linux,
 wrong platform. This never bit on Hyak (Linux, fork, and `--mem=180G` anyway).
 If Epsilon ever moves back to Linux, workers become cheap again.
+
+**Confirmed on RunPod 2026-08-11:** `num_workers: 8` is fine on Linux. `ps`
+shows 8 worker PIDs per arm, each reporting ~15.9 GB RSS — that is the *same*
+copy-on-write pages counted repeatedly, not 8 real copies. Actual host memory
+is ~32 GB for both arms combined, on a 141 GB box.
+
+**10.19 — 🚫 The RunPod dashboard's utilisation/memory/disk graphs lie. Do not
+diagnose from them.** 2026-08-11: with both GPUs pinned at 100% and 500W, the
+Pods list showed **Utilization 1% / 0%, Memory 0% / 0%, Disk 0% / 0%**. It
+looked exactly like both jobs had died, and cost a round of panic.
+
+The tell is that **Disk 0% is impossible** — 32 GB of dataset was sitting on a
+100 GB volume. When one number in a row is provably false, distrust the whole
+row; the telemetry agent drops out while the pod runs perfectly well.
+
+Diagnose **on the box**, never from the dashboard:
+
+```bash
+nvidia-smi                              # real utilisation, memory, power, temp
+ps aux | grep "[t]rain.py"              # are the processes alive
+tail -n 3 runs/unet.log runs/dit.log    # are the step counters advancing
+```
+
+The last one is the real answer: if `[step N]` is increasing, everything is
+fine no matter what any UI says.
+
+(Also normal and not a problem: 84–85 °C and ~500W/600W on these cards under
+sustained load. The rates were not decaying, so nothing was throttling.)
+
+**10.20 — `tail -2 file1 file2` fails over non-interactive SSH.** It returns
+`tail: option used in invalid context -- 2`. The bare `-2` is the obsolete
+option form, and GNU coreutils rejects it with multiple files in that context.
+It works interactively, which makes it look random. **Always write `tail -n 2`**
+in anything that might run over `ssh host "..."`.
 
 ---
 
@@ -1257,3 +1399,54 @@ box is a bad place to discover that.
 Both bash scripts syntax-check, and the exact `sample.py` invocation
 `eval_compare.sh` uses was executed against the real `runs/m5` checkpoint
 before shipping — so the CLI forms are proven, not assumed.
+
+**2026-08-11 (evening)** — **Cloud run launched and in flight. Full operational
+detail in §7.4; the durable lessons are here.**
+
+*The repo is finally runnable from a clone.* Aarav pushed `eps/data/` and the
+`.gitignore` fix. `git ls-tree origin/main eps/data/` now returns all three
+files. Two commits remain local (`3187354`, `77f4f68`).
+
+*Infrastructure.* Generated an SSH keypair at `~/.ssh/id_ed25519` — the machine
+had **no** `~/.ssh` at all, which is also why the earlier HTTPS `git push`
+failed with "could not read Username". The same key serves RunPod and GitHub.
+Deployed 2× RTX PRO 6000 Blackwell on Secure Cloud at $4.20/hr. Setup ran clean
+first time: 66 tests, full 1.28M fetch, 1000/1000 classes, shuffle verified.
+
+*The headline measurement, and a real finding.* **DiT-B/4 (130.4M) trains at
+3.20 it/s while the smaller U-Net (92.5M) manages 1.64.** The bigger model is
+2× faster. Cause is arithmetic intensity, not a bug — DiT is dense matmuls that
+saturate tensor cores; the U-Net's many small convolutions at 64×64 cannot feed
+a fast GPU. **This inverts the naive parameter-count intuition and belongs in
+the writeup**, alongside the FID numbers, as a measured architectural result.
+
+*A hypothesis I got wrong, tested, and rejected.* I predicted the U-Net was
+kernel-launch-bound and would speed up with a larger micro-batch. It did not:
+128×2-accum gave 1.63 it/s, 256×1 gave 1.64. `nvidia-smi` showed 100% util and
+504W at both. It is compute-bound. Recorded in §7.4 so nobody retries it. Note
+this is the **opposite** of the M5 Max result, where bigger batches were slower
+for memory reasons — neither finding generalises across machines, which is
+itself the point.
+
+*Scope cut, forced by the measurement.* 100k steps for the U-Net = 17 h = ~$71,
+over both the 12-hour window and the $60 budget. Cut the U-Net to **60,000
+steps** (~10.1 h, 15.4M images, ~12 epochs); left DiT at 100k since it is fast
+anyway. **The matched comparison survives at zero cost** because checkpoints
+save every 10k: evaluate U-Net@60k against DiT's `ckpt_0060000.pt`, and keep
+DiT@100k as a bonus. Relaunched the U-Net with `total_steps=60000` so it halts
+on its own rather than burning credits overnight.
+
+*Two new traps, both of which cost real time tonight.* §10.19: the RunPod
+dashboard reported 0% GPU/memory/disk while both cards were pinned at 100% and
+500W — it looked exactly like a crash. The giveaway was Disk 0% on a volume
+holding 32 GB, i.e. provably false. **Diagnose on the box with `nvidia-smi` and
+the step counter, never from the UI.** §10.20: `tail -2 a b` fails over
+non-interactive SSH with "option used in invalid context"; use `tail -n 2`.
+
+*Estimate corrected.* The eval sweep is **~2.5 h**, not the ~45 min this file
+and `eval_compare.sh` originally claimed — 6 runs × 10k samples × 100 ODE steps,
+with CFG doubling the NFE. Fixed in §8 and in the script header.
+
+*Still true and still the biggest risk:* the pod's volume is deleted on
+terminate. Everything must be `scp`'d off first. That is the only step in this
+whole plan where work can be irrecoverably lost.

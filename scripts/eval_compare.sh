@@ -12,7 +12,14 @@
 #   traj_<model>.png          the same seed at increasing guidance
 #
 # Cost note: the FID sweep is the expensive part — 6 evaluations x 10k samples
-# x 100 ODE steps. Budget ~45 min on one H100. The grids are ~2 minutes.
+# x 100 ODE steps, and CFG doubles the function evaluations. MEASURED-BASIS
+# ESTIMATE on 2x RTX PRO 6000: **~2.5 h**, not the ~45 min originally guessed
+# here. Roughly 80 min for the U-Net arm and 40 for the DiT, plus reference
+# export and Inception feature extraction.
+#
+# To halve it, drop to 5k samples: `NUM=5000 bash scripts/eval_compare.sh`.
+# FID is biased at low sample counts, but both models get identical treatment
+# so the *comparison* stays valid — just disclose the sample count.
 
 set -euo pipefail
 
