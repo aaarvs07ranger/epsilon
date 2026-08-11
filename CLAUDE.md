@@ -45,36 +45,40 @@ Re-fetched on the M5 Max 2026-08-11.
 
 ### Immediate next actions, in order
 
-Everything that was blocking is now done: the machine is set up, the data is
-local, throughput is measured, and training is running.
+The code is fixed, the data is local, throughput is measured, and the plan is
+settled (§7.3: RunPod, two single-GPU arms, U-Net vs DiT). The local M5 Max run
+was stopped at step 5,100 in favour of that. **One thing gates everything: the
+push in item 1.**
 
-1. **Commit and push 2026-08-11's work** — it is sitting **uncommitted** in the
-   working tree: `eps/data/` (new), the `.gitignore` fix, the `train_m5.yaml`
-   changes, the `_preview` guard, and this file. Until `eps/data/` is pushed
-   the public repo still does not run from a clone (§10.17). Highest-value
-   outstanding item. Verify with:
+1. **`git push origin main` — committed locally, NOT pushed.** This machine has
+   no GitHub credentials (no `gh`, no SSH key, nothing in the keychain), so the
+   push has to be done by hand:
    ```bash
-   git status --short
-   git clone . /tmp/epsilon-clonecheck && cd /tmp/epsilon-clonecheck \
-     && python -m pytest -q          # the check that would have caught 10.17
+   cd ~/Desktop/epsilon && git push origin main     # asks for a PAT, not a password
+   # or, once: brew install gh && gh auth login
    ```
-2. **Watch the first preview grid** at step 1000 (~83 min in):
-   `runs/m5/previews/step_0001000.png`. Expect noise-with-structure, not
-   recognisable objects. The point is confirming the sampler path runs.
-3. **Export the 50k FID reference** (§8) — ⛔ **not while training is running.**
-   `export_reference()` builds `ImageNet64(...)` with no `max_samples`, so it
-   loads a *second* full 15.7 GB copy of the split. With the trainer already
-   holding one and <1 GB free (§10.6), that will thrash and can take the run
-   down. Do it after training stops, or pass a cap / run it against the
-   validation split. An earlier note in this file claimed it "runs fine
-   alongside training, costs CPU not GPU" — that was wrong about memory.
-4. **Deploy the web demo**, without a checkpoint (§9). Decouples "live" from
-   "trained" and gets a public URL immediately.
-5. **Decide the real target** (§7.2). At a measured 0.20 it/s the flagship
-   400k-step / FID<12 recipe is ~23 days *and* the wrong model size. Pick a
-   step budget and report the FID actually achieved.
+   **Nothing on the cloud path works until this lands** — `setup_runpod.sh`
+   clones `main`, and without `eps/data/` a fresh clone cannot even import
+   (§10.17). The script hard-fails early with that exact message rather than
+   wasting 25 minutes on the data fetch first. Sanity check afterwards:
+   ```bash
+   git clone https://github.com/aaarvs07ranger/epsilon /tmp/clonecheck \
+     && cd /tmp/clonecheck && python -m pytest -q   # the check that would have caught 10.17
+   ```
+2. **`bash scripts/setup_runpod.sh`** on a 2-GPU RunPod box (§7.3). ~6 h,
+   ~$40, both arms. **Check `it/s` in the first two minutes** — under ~2 it/s
+   on an H100 means something is wrong; catch it then, not $40 later.
+3. **`bash scripts/eval_compare.sh`** when they finish → `results/fid.md` plus
+   sample grids. *Then* decide whether a larger tier (§7.3) is worth it —
+   **from the data**, which is the whole lesson of this project.
+4. **Deploy the web demo** (§9) — ZeroGPU on HF Spaces, and label the UI as
+   1000 ImageNet classes (§11: it is not text-to-image). Can ship before the
+   runs finish; `/api/generate` just returns 503 until a checkpoint exists.
+5. **Restate the target honestly** (§7.2). "FID < 12" is not among the options
+   at any tier now in play. Report the FID actually achieved with the compute
+   disclosed, plus the §6.4 repack caveat.
 6. **Revise the explainer artifact** (§2) — its runbook has been stale since
-   2026-08-08 and today's changes add to that.
+   2026-08-08 and everything from 2026-08-11 adds to that.
 
 ---
 
@@ -764,11 +768,26 @@ EPSILON_CKPT=runs/unet64/ckpt_latest.pt \
     ./.venv/bin/uvicorn eps.web.app:app --host 0.0.0.0 --port 7860
 ```
 
-The SPA lets a visitor type a prompt (fuzzy-matched to an ImageNet class),
-choose ODE vs SDE, velocity vs score, guidance scale, and step count. Without a
-checkpoint the UI still loads and `/api/generate` returns 503 — deployable
-before training finishes. Deploy anywhere a Python process runs (HF Spaces /
-Railway / VPS): `pip install -e .[web]`, set `EPSILON_CKPT`, run uvicorn.
+The SPA lets a visitor type a prompt (**fuzzy-matched to one of 1000 ImageNet
+classes** — this is not text-to-image, see §11), choose ODE vs SDE, velocity vs
+score, guidance scale, and step count. Without a checkpoint the UI still loads
+and `/api/generate` returns 503 — deployable before training finishes.
+
+**Free deployment target: Hugging Face Spaces on ZeroGPU** (free, GPU-backed,
+queued). Decided 2026-08-11.
+
+⚠️ **The free CPU tier is not viable as configured.** A 92.5M U-Net at 100 ODE
+steps with CFG is ~200 forward passes per image; on 2 vCPU that is minutes per
+image. If you must run CPU-only, drop `sampling.solver` to Heun at ~20 steps
+(Heun is 2nd-order, so 20 Heun steps ≈ 40 function evals and looks far better
+than 20 Euler steps). Otherwise use ZeroGPU and keep 100 steps.
+
+Deploy anywhere a Python process runs: `pip install -e .[web]`, set
+`EPSILON_CKPT`, run uvicorn.
+
+**Label the UI honestly.** It should say the model generates from 1000 ImageNet
+classes at 64x64. A visitor who types a scene description and gets one object
+will otherwise read the demo as broken rather than as scoped.
 
 ---
 
@@ -971,6 +990,35 @@ If Epsilon ever moves back to Linux, workers become cheap again.
 - **The MIT labs** (`lab_one/two/three.ipynb`) were convention cross-checks
   only (time direction, α/β abstraction, CFG combination). **No lab code is
   reused** — this matters for the capstone's originality claim.
+
+- **Epsilon is CLASS-conditional, not text-to-image. Settled 2026-08-11; do
+  not reopen without a deliberate scope change.** Asked directly whether to
+  scale up "to get the best possible text-to-image generator", the answer is
+  that no amount of training produces one. Verified by grep: there is **no
+  text encoder anywhere in the codebase** — no `open_clip`, no `CLIPText`, no
+  tokeniser. Conditioning is `LabelEmbedder` = `nn.Embedding(1000 + 1, hidden)`,
+  a lookup over 1000 ImageNet class indices plus the null token. The web demo's
+  prompt box **fuzzy-matches free text onto one of those 1000 class names**
+  (`_match_class` in `eps/web/app.py`), so "a cat riding a skateboard" resolves
+  to `tabby cat`. That is a text box over a class picker.
+
+  Real text-to-image would need all of: a *captioned* dataset (ImageNet has no
+  captions — COCO / CC3M / CC12M), a frozen text encoder, cross-attention
+  actually wired and tested (`DiTConfig.cross_attention` / `context_dim` are
+  scaffolding that nothing feeds), and realistically latent diffusion at 256px,
+  because 64x64 text-to-image looks bad at any training budget. That is a
+  different project — weeks of work and four-to-five figures of compute
+  (SD-1.4 was ~150k A100-hours). The `text` and `latent` extras in
+  `pyproject.toml` are declared but **unused**; their presence is not evidence
+  that the feature is close.
+
+  The capstone's contribution is §2 — every equation implemented from the
+  6.S184 notes and checked against an independent construction. A well-trained,
+  honestly-reported class-conditional model demonstrates that fully; a
+  half-trained text-to-image model demonstrates it worse and costs ~50x more.
+  **Aarav chose to keep it class-conditional (2026-08-11).** Label the demo UI
+  as "1000 ImageNet classes" so it reads as an honest demo rather than a broken
+  text-to-image model.
 
 ---
 
