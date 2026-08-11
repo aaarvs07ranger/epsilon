@@ -2,9 +2,19 @@
 # One-shot setup for a RunPod (or any Linux/CUDA) box: verify the GPU, install
 # Epsilon, fetch ImageNet-64, and launch the U-Net and DiT arms on two GPUs.
 #
+# BOOTSTRAP — on a fresh pod you do not have the repo yet, and this script is
+# inside it. It clones the repo itself, so run it straight off GitHub:
+#
+#   curl -fsSL https://raw.githubusercontent.com/aaarvs07ranger/epsilon/main/scripts/setup_runpod.sh | bash
+#
+# Once the repo exists (or from a laptop checkout):
+#
 #   bash scripts/setup_runpod.sh              # full: verify -> install -> data -> launch
 #   bash scripts/setup_runpod.sh --no-launch  # stop after the data is ready
 #   bash scripts/setup_runpod.sh --verify     # just the preflight checks, then exit
+#
+# To pass a flag through the curl form:
+#   curl -fsSL <url> | bash -s -- --verify
 #
 # Expected timeline on a 2xH100 box:
 #   install ~3 min, dataset ~25 min, then ~6 h of training for BOTH arms in

@@ -110,4 +110,23 @@ READ THE NUMBERS HONESTLY:
   * DiT is expected to lose at a matched 100k steps — it wants longer training
     than a U-Net. That is a statement about this compute budget, not about the
     architecture.
+
+>>> BEFORE YOU TERMINATE THE POD, GET YOUR RESULTS OFF IT. <<<
+Everything below is deleted with the pod and is not recoverable:
+
+    results/                      the FID table and every grid
+    runs/cloud_unet/ckpt_latest.pt
+    runs/cloud_dit/ckpt_latest.pt        (~1.4 GB each — the trained weights)
+    runs/cloud_*/previews/               training-progress grids
+
+Smallest useful bundle (a few MB, excludes the checkpoints):
+
+    tar czf epsilon_results.tgz results runs/cloud_*/previews runs/*.log
+
+Then pull it down from your laptop, or use `runpodctl send epsilon_results.tgz`.
+The checkpoints are worth keeping too if you want to sample or evaluate later —
+without them you would have to retrain to change anything.
+
+And TERMINATE the pod, do not just stop it: a stopped pod keeps billing for its
+storage.
 EOF
