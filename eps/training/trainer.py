@@ -307,27 +307,34 @@ class Trainer:
             self.sample_size,
             self.sample_size,
         )
-        with self._with_ema() as net:
-            x = sample_batch(
-                net,
-                self.path,
-                cfg,
-                classes,
-                classes.shape[0],
-                shape,
-                self.device,
-                guidance_scale=cfg.eval.sample_guidance_scale,
-                num_steps=cfg.eval.sample_steps,
-                method="ode",
-            )
-            if self.vae is not None:
-                x = self.vae.decode(x)
-        out = self.out_dir / "previews" / f"step_{self.step:07d}.png"
-        save_image_grid(x, out, num_columns=4)
-        if self.wandb:
-            import wandb
+        try:
+            with self._with_ema() as net:
+                x = sample_batch(
+                    net,
+                    self.path,
+                    cfg,
+                    classes,
+                    classes.shape[0],
+                    shape,
+                    self.device,
+                    guidance_scale=cfg.eval.sample_guidance_scale,
+                    num_steps=cfg.eval.sample_steps,
+                    method="ode",
+                )
+                if self.vae is not None:
+                    x = self.vae.decode(x)
+            out = self.out_dir / "previews" / f"step_{self.step:07d}.png"
+            save_image_grid(x, out, num_columns=4)
+            if self.wandb:
+                import wandb
 
-            self.wandb.log({"eval/preview": wandb.Image(str(out))}, step=self.step)
+                self.wandb.log({"eval/preview": wandb.Image(str(out))}, step=self.step)
+        except Exception as e:
+            # Same rule as _fid: a preview grid is a convenience, and must never
+            # take down a run that has been going for days. Sampling touches
+            # code the training step does not (the ODE integrator, CFG, EMA
+            # swap, PNG write), so it has its own ways to fail.
+            print(f"[epsilon] preview sampling failed at step {self.step}: {e}")
 
     def _fid(self) -> None:
         cfg = self.cfg

@@ -18,54 +18,63 @@
 
 ## 1. Status board
 
-**Last updated: 2026-08-08 (evening)**
+**Last updated: 2026-08-11**
 
 | Area | State |
 |---|---|
-| Math core (`paths`, `losses`, samplers) | ✅ Complete, 66 tests pass (~1.8 s) |
+| Math core (`paths`, `losses`, samplers) | ✅ Complete, 66 tests pass (~4.7 s on M5 Max) |
 | Models (U-Net 273.0M, DiT-B/4 130.4M, 92.5M small) | ✅ Complete, verified on `meta` device |
-| Trainer (DDP, EMA, AMP, ckpt, resume) | ✅ Complete; AMP now correct on CUDA **and** MPS |
+| Trainer (DDP, EMA, AMP, ckpt, resume) | ✅ Complete; AMP correct on CUDA **and** MPS; `_preview` now exception-guarded (2026-08-11) |
+| `eps/data/` package | ✅ **Reconstructed 2026-08-11** — had never been committed (§10.17) |
 | Web demo (FastAPI + SPA) | ✅ Complete, loads without a checkpoint |
-| **Labeled data** | ✅ Source unblocked 2026-08-06 (§6); **not yet fetched anywhere** |
-| Git / GitHub | ✅ Public repo `aaarvs07ranger/epsilon` |
-| **Execution venue** | 🔀 **CHANGED 2026-08-08: moving off Hyak to a single M5 Max.** See §7.0 |
+| **Labeled data** | ✅ Source unblocked 2026-08-06 (§6); **fetched on the M5 Max 2026-08-11** |
+| Git / GitHub | ⚠️ Public repo `aaarvs07ranger/epsilon` — **2026-08-11's work is uncommitted in the working tree**, see actions below |
+| **Execution venue** | 🔀 **CHANGED 2026-08-11 (later): moving to rented RunPod GPUs.** M5 Max works but is ~5.5 days/run — see §7.3 |
 | Hyak (rao) | ⛔ **Abandoned for Epsilon** — `/gscratch` 100% full (§10.15), GPUs needed by NSL (§10.14) |
-| Measured throughput | ✅ **M4: 0.26 it/s @ batch 32 = 8.3 img/s** (§7.0). M5 Max: ⏳ unmeasured |
-| **FID < 12 target** | 🔴 **Unfunded by any hardware in play.** Needs honest restatement — §7.2 |
-| Dataset fetched | ⏳ Not done (do it on the M5 Max — ~700 GB free, no quota) |
-| Real training run | ⏳ Not started |
-| FID reference set | ⏳ Not exported |
+| Measured throughput | ✅ **M5 Max: 0.20 it/s = 51 img/s** as configured (§7.0). M4: 8.3 img/s |
+| **FID < 12 target** | 🔴 **Still unfunded.** Now quantified — §7.2. Needs Aarav's call |
+| Dataset fetched | ✅ Full 1.28M train split on the M5 Max (§6.2) |
+| Real training run | ⏸️ **M5 Max run stopped at step 5,100/100,000** (5.3 h, loss 1.29→0.167, no errors). Artifacts kept in `runs/m5` (4.2 GB: ckpt 2500/5000, 5 previews). Superseded by §7.3 |
+| **U-Net vs DiT comparison** | 🎯 **This is the plan now** — `configs/train_cloud_{unet,dit}.yaml`, verified controlled (§7.3) |
+| FID reference set | ⏳ Not exported — can be done while training runs |
 | Public demo deployment | ⏳ Not started — **can ship before training finishes** (§9) |
 
 Local-only convenience: `data/imagenet64_small` — 20k images but **only 16
 classes** (fish/sharks; `--limit` takes a class prefix, §6.3). Smoke tests only.
+Re-fetched on the M5 Max 2026-08-11.
 
 ### Immediate next actions, in order
 
-**Blocked until ~2026-08-09/10, when Aarav is home with the M5 Max.** Nothing
-useful remains to be done on Hyak; do not restart that path.
+Everything that was blocking is now done: the machine is set up, the data is
+local, throughput is measured, and training is running.
 
-0. **On the laptop, now:** `git push` so the M5 Max can clone. (Done 2026-08-08.)
-1. **Clean Epsilon off Hyak** — §7.0 has the exact commands. Frees ~6 GB for NSL.
-   *Only* `/gscratch/rao/aaravs07/epsilon`. **Never touch `.../nsl` (§10.14).**
-2. **M5 Max setup:** clone → venv → `pip install -e ".[data,web]"` →
-   `pytest -q` (expect 66 passed).
-3. **MEASURE IT/S FIRST — 200 steps, ~10 min.** This is the one number the
-   whole plan hangs on and it has never been measured on the real machine:
+1. **Commit and push 2026-08-11's work** — it is sitting **uncommitted** in the
+   working tree: `eps/data/` (new), the `.gitignore` fix, the `train_m5.yaml`
+   changes, the `_preview` guard, and this file. Until `eps/data/` is pushed
+   the public repo still does not run from a clone (§10.17). Highest-value
+   outstanding item. Verify with:
+   ```bash
+   git status --short
+   git clone . /tmp/epsilon-clonecheck && cd /tmp/epsilon-clonecheck \
+     && python -m pytest -q          # the check that would have caught 10.17
    ```
-   python scripts/train.py --config configs/train_m5.yaml \
-       data.root=data/imagenet64_small data.max_samples=4096 \
-       training.total_steps=200 logging.output_dir=/tmp/bench
-   ```
-   Multiply by 256 (the global batch) for images/s. Set `total_steps` from
-   this, not from the config's placeholder 150000.
-4. **Fetch the full dataset** (§6.2) — ~32 GB peak, trivial locally.
-5. **Deploy the web demo immediately**, without a checkpoint (§9). Decouples
-   "live" from "trained" and gets a public URL on day one.
-6. **Launch training** detached under `caffeinate -is nohup` (§7.0). Use
-   `eval.sample_every=1000` on the first run — the default 5000 is ~5 h
-   between preview grids at these rates.
-7. **Export the 50k FID reference**, evaluate EMA weights, report honestly.
+2. **Watch the first preview grid** at step 1000 (~83 min in):
+   `runs/m5/previews/step_0001000.png`. Expect noise-with-structure, not
+   recognisable objects. The point is confirming the sampler path runs.
+3. **Export the 50k FID reference** (§8) — ⛔ **not while training is running.**
+   `export_reference()` builds `ImageNet64(...)` with no `max_samples`, so it
+   loads a *second* full 15.7 GB copy of the split. With the trainer already
+   holding one and <1 GB free (§10.6), that will thrash and can take the run
+   down. Do it after training stops, or pass a cap / run it against the
+   validation split. An earlier note in this file claimed it "runs fine
+   alongside training, costs CPU not GPU" — that was wrong about memory.
+4. **Deploy the web demo**, without a checkpoint (§9). Decouples "live" from
+   "trained" and gets a public URL immediately.
+5. **Decide the real target** (§7.2). At a measured 0.20 it/s the flagship
+   400k-step / FID<12 recipe is ~23 days *and* the wrong model size. Pick a
+   step budget and report the FID actually achieved.
+6. **Revise the explainer artifact** (§2) — its runbook has been stale since
+   2026-08-08 and today's changes add to that.
 
 ---
 
@@ -103,44 +112,68 @@ still accurate — the rot is confined to the runbook and the plan.
 
 ## 3. Environment
 
-| | |
-|---|---|
-| Project root | `/Users/aarav/Desktop/epsilon` |
-| Python package | `eps/` — so `from eps.paths import ...` |
-| Machine | macOS (darwin 25.5.0), Apple Silicon, ~730 GB free |
-| Python | 3.13.6 (in `.venv`) |
-| torch | 2.13.0, **MPS available**, no CUDA |
-| numpy | 2.5.1 |
-| Tests | `./.venv/bin/python -m pytest -q` → 66 passed |
+**Two machines.** The M5 Max is now the training machine (§7.0); the M4 remains
+the dev/smoke box and is where everything before 2026-08-11 was measured.
 
-### Installed vs. not (local venv, as of 2026-08-06)
+| | M5 Max — training | M4 — dev |
+|---|---|---|
+| Project root | `/Users/mohit/Desktop/epsilon` | `/Users/aarav/Desktop/epsilon` |
+| Chip | **M5 Max, 18-core CPU / 32-core GPU** | M4, 10-core GPU |
+| Memory | 36 GB unified (MPS may use ~30.2 GB) | 32 GB unified |
+| Free disk | **1.7 TB** | ~700 GB |
+| OS | macOS 26.5 (darwin 25.5.0) | macOS (darwin 25.5.0) |
+| Python | 3.13.13 (in `.venv`) | 3.13.6 |
+| torch / numpy | 2.13.0 / 2.5.2, **MPS + bf16 verified** | 2.13.0 / 2.5.1 |
+| Tests | `./.venv/bin/python -m pytest -q` → 66 passed | 66 passed |
 
-Present: `torch`, `numpy`, `pyyaml`, `pillow`, `fastapi`, `uvicorn`,
-`pyarrow` 25.0.0, `huggingface_hub` 1.26.0.
+Python package is `eps/` — so `from eps.paths import ...`.
 
-**Missing:** `wandb`, `torch-fidelity`, `clean-fid`. Consequences:
-- Any config with `logging.wandb: true` (both training configs have it) will
-  crash locally on `import wandb`. Always pass `logging.wandb=false` for local
-  runs, or install wandb.
-- `scripts/evaluate_fid.py run` cannot compute metrics locally yet.
+### Installed vs. not (M5 Max venv, as of 2026-08-11)
 
-### venv gotcha (bites every session)
+Installed via `pip install -e ".[data,web,dev,eval]"`. Present: `torch`,
+`torchvision`, `numpy`, `scipy`, `pyyaml`, `pillow`, `fastapi`, `uvicorn`,
+`pyarrow` 25.0.1, `huggingface_hub` 1.27.0, `pytest`, and — **new on this
+machine** — `torch-fidelity` 0.4.0 and `clean-fid` 0.1.35, so
+`scripts/evaluate_fid.py run` works here. That closes the gap noted on the M4.
 
-`source .venv/bin/activate && pip install ...` resolves to the **system** pip
-and fails with a PEP 668 "externally-managed-environment" error. `python` does
-resolve correctly. Always install with the explicit interpreter path:
+**Still missing, deliberately:** `wandb`. `train_m5.yaml` already sets
+`logging.wandb: false`, so nothing needs overriding for the M5 run — but
+`train_unet.yaml` / `train_dit.yaml` still say `true` and will crash on
+`import wandb`. Pass `logging.wandb=false` if you use those (§10.3).
 
-```bash
-./.venv/bin/pip install <pkg>          # correct
-./.venv/bin/python -m pytest -q        # correct
-```
+### venv gotchas (bite every session)
+
+1. `source .venv/bin/activate && pip install ...` resolves to the **system**
+   pip and fails with a PEP 668 "externally-managed-environment" error.
+   Always use the explicit interpreter path:
+
+   ```bash
+   ./.venv/bin/pip install <pkg>          # correct
+   ./.venv/bin/python -m pytest -q        # correct
+   ```
+
+2. **The stock `python3` on this Mac is 3.9.6** (Xcode CLT), below the
+   `requires-python = ">=3.10"` floor. A `.venv` built with it installs
+   nothing useful — that is exactly what was sitting in the fresh clone on
+   2026-08-11. Real 3.13 lives at `~/.local/bin/python3.13`, with `uv` beside
+   it at `~/.local/bin/uv`. Rebuild with:
+
+   ```bash
+   rm -rf .venv && uv venv --python ~/.local/bin/python3.13 .venv
+   VIRTUAL_ENV=$PWD/.venv uv pip install -e ".[data,web,dev,eval]"
+   ```
+
+3. **`uv venv` does not put `pip` in the venv.** `./.venv/bin/pip` then does
+   not exist and gotcha 1's advice silently has nothing to run. `pip` has been
+   installed into this venv explicitly so the documented commands work; if you
+   ever rebuild the venv with `uv`, run `uv pip install pip` again.
 
 ---
 
 ## 4. Repository layout
 
 ```
-epsilon/                      # project root (NOT a git repo yet — see §10.1)
+epsilon/                      # project root (git repo since 2026-08-07)
 ├── CLAUDE.md                 # this file
 ├── README.md                 # public-facing docs
 ├── PRIME_LECTURE_NOTES.pdf   # mathematical source of truth (MIT 6.S184)
@@ -332,43 +365,167 @@ estimate is that 4× RTX 6000 is still **2–4× faster** than one M5 Max. The w
 is availability (no queue, no 2FA, no preemption), disk (~700 GB vs 19 GB), and
 not stealing resources from the higher-priority project.
 
-#### Measured throughput — the project's first real number
+#### Measured throughput — ✅ MEASURED 2026-08-11, no longer an estimate
 
 | Machine | Config | Rate |
 |---|---|---|
 | **M4, 10-core GPU** | 92.5M U-Net, 64×64, batch 32, bf16, grad-ckpt ON | **0.26 it/s = 8.3 img/s** |
-| M5 Max, 32-core GPU | same model, grad-ckpt OFF | **UNMEASURED — do this first** |
+| **M5 Max, 32-core GPU** | same model, batch 64 × 4 accum = 256, grad-ckpt OFF, `num_workers=2` | **0.22 it/s = 56 img/s** |
+| **M5 Max — as actually configured** | same, but `num_workers=0` (required, §10.18) | **0.20 it/s = 51 img/s** |
 
-Rough extrapolation for the M5 Max is 5–12× the M4 (3.2× the GPU cores, plus
-per-core neural accelerators, plus ~1.35× from dropping gradient checkpointing)
-→ ~50–90 img/s. At global batch 256 that is roughly:
+200 steps, stable across all eight 25-step windows (no thermal decay over
+~15 min); loss 1.236 → 1.154. **6.2× the M4** at the configuration actually
+used — inside the 5–12× band that was predicted, so for once the extrapolation
+held. Use **0.20 it/s** for planning: `num_workers=0` is forced by §10.18, and
+its ~9% cost is real.
 
-| Steps | Est. wall-clock |
+Wall-clock at 0.20 it/s, global batch 256:
+
+| Steps | Wall-clock (measured basis) |
 |---|---|
-| 50k | 1.5–3 days |
-| 100k | 3–6 days |
-| 150k | 5–9 days |
+| 50k | **2.9 days** |
+| 100k | **5.8 days** |
+| 150k | **8.7 days** |
 
-**Treat every one of those numbers as unfunded until step 3 of §1 is done.**
-The whole point of the 2026-08-07 lesson is to stop planning from arithmetic.
+That is the pessimistic end of the earlier 3–6 / 5–9 day estimate.
+
+**Confirmed at full scale** on the real run (all 1,281,167 images resident,
+not the 4,096-image benchmark subset): steps 50 and 100 gave **0.22 and 0.20
+it/s** — the benchmark transferred honestly, so 0.20–0.22 is the real range and
+~5.3–5.8 days for 100k steps. The remaining caveat is thermal: a run of days
+throttles harder than 15 minutes does.
+
+⚠️ **Watch item — memory is fully committed.** With the split resident,
+`vm_stat` during the run shows ~21 GB wired, ~6 GB in the compressor, and
+<1 GB free of 36 GB; swap is heavily used (partly by other apps — Cursor, a
+Streamlit server). Throughput is holding so far, but each step touches 256
+random rows across 15.7 GB, so if pages get pushed to swap the rate will decay.
+If `it/s` drops materially over the coming hours, in increasing order of effort:
+1. Close other memory-hungry apps.
+2. `data.max_samples=640000` — halves resident memory, still 500 images/class.
+3. **Back `ImageNet64` with a memmap over the npz members instead of loading
+   into RAM.** The shards are uncompressed, so this is very doable and is the
+   right design for this machine: resident memory drops to ~0 and the OS page
+   cache serves reads from a local SSD, with no swap involved. It would also
+   make `num_workers > 0` safe again (§10.18), recovering that 9%.
+
+Larger micro-batches at the same global batch (128 × 2, 256 × 1) were tried and
+**abandoned as slower** — 128 had not finished 45 steps in the time batch 64
+needed for ~100. Not fully characterised, but there is no win there; 64 × 4
+stands.
 
 #### Running it
 
 `configs/train_m5.yaml` — 92.5M params, bf16, **no** gradient checkpointing
 (that exists only to fit 24 GB and costs ~30% compute), global batch 256 via
-64 × 4 accumulation, `num_workers: 2` because `ImageNet64` holds the whole
-split in RAM as uint8 (~16 GB) against 36 GB shared with the GPU.
+64 × 4 accumulation, and `num_workers: 0` — which is a **correctness**
+requirement on macOS, not a tuning knob. See §10.18 before changing it.
+
+The command actually used to launch the 2026-08-11 run:
 
 ```bash
-caffeinate -is nohup ./.venv/bin/python scripts/train.py \
-    --config configs/train_m5.yaml > runs/train.log 2>&1 &
+mkdir -p runs
+PYTHONUNBUFFERED=1 nohup caffeinate -is ./.venv/bin/python scripts/train.py \
+    --config configs/train_m5.yaml \
+    training.total_steps=100000 \
+    eval.sample_every=1000 \
+    logging.ckpt_every=2500 \
+    > runs/train.log 2>&1 &
 ```
 
-`caffeinate -is` is not optional — the run dies with the display otherwise.
+- `caffeinate -is` is not optional — the run dies with the display otherwise.
+- `PYTHONUNBUFFERED=1` matters: piped to a file, Python block-buffers stdout
+  and the log looks frozen for many minutes. Cost an interim reading during
+  the benchmark before it was added.
+- `eval.sample_every=1000` ≈ 83 min between preview grids at 0.20 it/s; the
+  config default of 5000 is ~7 h, too coarse to notice a problem early.
+- `logging.ckpt_every=2500` ≈ 3.5 h, bounding what a crash costs. 40
+  checkpoints × 1.48 GB ≈ 59 GB — fine at 1.7 TB free, and worth it.
+
+**`total_steps` only sets where the run stops.** `lr_schedule: constant` means
+no schedule depends on it, so stopping early at any checkpoint is legitimate,
+and extending later is just:
+
+```bash
+... scripts/train.py --config configs/train_m5.yaml \
+    --resume runs/m5/ckpt_latest.pt training.total_steps=150000
+```
+
+Monitoring:
+
+```bash
+tail -f runs/train.log                   # loss + it/s every 50 steps
+open runs/m5/previews/                   # a grid every 1000 steps
+```
 
 If the measured rate makes 64×64 infeasible, `data.image_size=32` (and
 `attention_resolutions=[8,4]`) is ~4× less compute per step; the codebase is
 resolution-agnostic.
+
+### 7.3 Cloud execution — RunPod, two single-GPU arms (decided 2026-08-11)
+
+**Why.** The M5 Max works but costs ~5.5 days per run, and the project wants
+*two* models (U-Net and DiT) plus FID and visualisations. Aarav opted to rent
+GPUs. Measured local rate 0.21 it/s = 54 img/s; expected ~1100–1350 img/s on an
+H100, i.e. **~6 h for 100k steps instead of 5.5 days, for roughly $40 total.**
+
+**Why two single-GPU processes and NOT DDP / torchrun.** The trainer's DDP path
+has **never been executed** — Hyak was abandoned before any training happened,
+so `launch_hyak.sh`, `wrap_ddp`, and the `DistributedSampler` branch are all
+unproven. The single-process path has verified hours behind it. Renting an
+8-GPU box to debug DDP by the hour is the expensive way to find that out. So:
+one arm per GPU, two independent processes, zero DDP risk, both models in the
+same wall-clock.
+
+If DDP is ever wanted, validate it on the cheapest possible 2-GPU box first and
+treat that as its own task — do not fold it into a paid training run.
+
+**The configs are a controlled experiment.** `train_cloud_unet.yaml` and
+`train_cloud_dit.yaml` are byte-identical apart from `model:` and
+`logging.output_dir`. Verified programmatically 2026-08-11: comparing every
+field of `path`, `data`, `training`, `eval` between the two produced **no
+differences**. Keep it that way — if you change a training knob in one, change
+it in the other or the comparison means nothing.
+
+| Arm | Model | Params | Global batch | Steps | Images |
+|---|---|---|---|---|---|
+| `train_cloud_unet.yaml` | ADM-style U-Net | 92.5M | 256 | 100k | 25.6M |
+| `train_cloud_dit.yaml` | DiT-B/4, pixel space | 130.4M | 256 | 100k | 25.6M |
+
+Both are the *same* 92.5M U-Net measured locally, so the cloud speedup reads
+directly off the it/s. Note the arms are **not** parameter-matched (92.5M vs
+130.4M); there is no clean equal-size pairing at standard DiT sizes, so
+describe it as "DiT-B/4 vs a 92.5M U-Net", not as matched capacity.
+
+⚠️ **DiT is expected to lose at a matched 100k steps.** The original configs
+budgeted DiT 600k steps against the U-Net's 400k precisely because DiT wants
+longer training for the same FID. A U-Net win here is a statement about *this
+compute budget*, not about the architecture. Say that explicitly.
+
+**Scripts.**
+
+```bash
+bash scripts/setup_runpod.sh --verify   # GPU/driver/disk preflight only
+bash scripts/setup_runpod.sh            # install -> data -> launch both arms
+bash scripts/eval_compare.sh            # FID sweep + grids -> results/
+bash scripts/eval_compare.sh --grids-only   # just the pictures, ~2 min
+```
+
+`setup_runpod.sh` deliberately **reuses the container's existing torch** via
+`venv --system-site-packages` rather than installing our own. That sidesteps
+§10.11 entirely: the container's torch already matches its driver, whereas
+`pip install torch` pulls a CUDA 13 build that needs r580+. It also hard-fails
+early if the clone lacks `eps/data/` (§10.17), rather than crashing 25 minutes
+later after the data fetch.
+
+`num_workers: 8` in both cloud configs is safe **because Linux forks** its
+dataloader workers and they share the 15.7 GB split copy-on-write. That same
+value on macOS is fatal — see §10.18 before copying it anywhere local.
+
+**What to check in the first two minutes of a paid run:** the `it/s` in each
+log. Multiply by 256 for images/s. Under ~2 it/s on an H100 means something is
+wrong (oversubscribed host, throttling, starved dataloader) — catch it then,
+not six hours and $40 later.
 
 #### Cleaning Epsilon off Hyak
 
@@ -386,16 +543,24 @@ touched.** Never use a wildcard under `/gscratch/rao/aaravs07/`.
 
 ---
 
-### Local (MacBook, MPS) — development scale only
+### Local smoke tests — development scale only
 
 ```bash
-./.venv/bin/python scripts/train.py --config configs/train_unet.yaml \
-    data.max_samples=50000 training.batch_size=32 \
-    training.mixed_precision=none logging.wandb=false
+./.venv/bin/python scripts/train.py --config configs/train_m5.yaml \
+    data.root=data/imagenet64_small data.max_samples=4096 \
+    training.total_steps=200 logging.output_dir=/tmp/bench
 ```
 
-`mixed_precision=none` and `logging.wandb=false` are both required locally
-(autocast bf16/fp16 is CUDA-gated in the trainer; wandb is not installed).
+⚠️ **Corrected 2026-08-11.** This block used to pass
+`training.mixed_precision=none`, on the grounds that "autocast bf16/fp16 is
+CUDA-gated in the trainer". **That has been false since 2026-08-08**, when the
+MPS autocast bug was fixed — bf16 autocast now works on Apple silicon and
+forcing `none` just runs fp32 and throws away ~30% of the speed. Leave
+`mixed_precision: bf16`.
+
+`logging.wandb=false` is still needed for `train_unet.yaml` / `train_dit.yaml`
+(wandb is not installed, §10.3). `train_m5.yaml` already sets it, so the
+command above needs no override.
 
 ### Hyak (klone) — production scale
 
@@ -432,6 +597,42 @@ Turing means **no bf16 tensor cores** (§10.13) and only 20 CPUs total across
 4 GPUs, so `num_workers` must stay modest.
 
 ### 7.2 The scale problem — read before promising FID < 12
+
+**2026-08-11: this is no longer an argument, it is arithmetic on a measured
+number.** Epsilon runs on one M5 Max at **0.20 it/s at global batch 256**
+(§7.0). Against the flagship recipe:
+
+| | Flagship (8×A100) | What this machine does |
+|---|---|---|
+| Params | 273.0M | 92.5M |
+| Global batch | 1024 | 256 |
+| Steps | 400k | ~100k (5.8 days) |
+| **Images seen** | **410M ≈ 320 epochs** | **25.6M ≈ 20 epochs** |
+
+So the run now training sees **1/16 the images** with **1/3 the parameters**.
+Running the *actual* flagship recipe here would cost roughly 4× (batch) × ~3×
+(params) ≈ 12× per step, i.e. ~0.017 it/s → **400k steps ≈ 270 days.** It is
+not a question of patience.
+
+**Therefore: FID < 12 will not be reached, and the writeup should not claim
+it.** The honest framing, and the one the artifact and README should adopt:
+
+> A 92.5M-parameter class-conditional flow-matching model trained from scratch
+> on ImageNet-64 for N steps (25.6M images) on a single consumer laptop GPU,
+> reaching FID X. Published ImageNet-64 numbers (ADM 2.07) use 1–2 orders of
+> magnitude more compute; the comparison is one of method, not of scale.
+
+That framing is *stronger* for a capstone than a missed target, because the
+verification discipline (§2) is the actual contribution. Pair it with the §6.4
+caveat about the Lanczos/JPEG repack, which independently makes absolute FID
+non-comparable.
+
+**The final target is Aarav's call and is still not made.** What is now settled
+is that "FID < 12" is not among the options.
+
+---
+
+Historical, for the Hyak allocation (kept because it explains the decisions):
 
 The flagship recipe (273M U-Net, global batch 1024, 400k steps) was written for
 **8×A100**. The rao allocation is **4× Quadro RTX 6000**. The gap is not small:
@@ -518,11 +719,38 @@ These disagreeing is correct, not a bug. Don't "unify" them.
     --ref data/fid_ref --num 50000 --guidance 1.5 --steps 100
 ```
 
+⛔ **Do not run `export-ref` while training is running.** It builds
+`ImageNet64(...)` with **no `max_samples`**, so it loads a second full 15.7 GB
+copy of the training split. The trainer already holds one and the machine sits
+at <1 GB free (§10.6) — running both will thrash and can take the run down.
+Either wait until training stops, or point it at the (much smaller) validation
+split:
+
+```bash
+./.venv/bin/python scripts/fetch_imagenet_hf.py --split validation \
+    --out data/imagenet64                       # 50k images -> val_data.npz, ~0.6 GB
+./.venv/bin/python scripts/evaluate_fid.py export-ref \
+    --data-root data/imagenet64 --out data/fid_ref --num 50000 --split val
+```
+
+⚠️ **The two scripts spell the split differently.** The fetcher takes
+`--split validation` (choices: `train|validation|test`); `evaluate_fid.py`
+takes `--split val` (choices: `train|val`). Passing `validation` to the
+evaluator is an argparse error. `ImageNet64` itself accepts `val`, `valid`, or
+`validation` and globs `val_data*.npz` for all three.
+
+The validation split is already shuffled upstream (§6.3), so it needs no global
+permutation, and 50k images is exactly the reference size. Note that FID
+against a *validation*-derived reference is a slightly different quantity than
+against a train-derived one — pick one and say which in the writeup.
+
 Report the **50k** number. In-training FID is available via `eval.fid_every`
 and `eval.fid_reference_dir` (heavy; off by default). `_fid()` in the trainer
-swallows exceptions by design — FID must never kill a long run.
+swallows exceptions by design — FID must never kill a long run, and as of
+2026-08-11 `_preview()` is guarded the same way.
 
-Needs `torch-fidelity` (not installed locally yet).
+`torch-fidelity` 0.4.0 and `clean-fid` 0.1.35 **are** installed on the M5 Max
+(§3), so this works here — the "not installed locally" note applied to the M4.
 
 ---
 
@@ -546,12 +774,16 @@ Railway / VPS): `pip install -e .[web]`, set `EPSILON_CKPT`, run uvicorn.
 
 ## 10. Traps and known issues
 
-**10.1 — The repo is not under git.** `git status` → "not a git repository".
-The entire Hyak deploy path is `git clone`, so this blocks everything. Before
-`git init`, write a `.gitignore` covering at minimum:
-`.venv/`, `data/`, `runs/`, `logs/`, `*.zip`, `*.dmg`, `*.pt`, `*.npz`,
-`__pycache__/`, `.pytest_cache/`, `eps/data/imagenet64/`.
-The 11.3 GB zip and the 125 MB dmg must never enter git history.
+**10.1 — ✅ RESOLVED 2026-08-07.** The repo is under git and pushed to
+`https://github.com/aaarvs07ranger/epsilon`. The `.gitignore` covers `.venv/`,
+`/data/`, `runs/`, `logs/`, `*.zip`, `*.dmg`, `*.pt`, `*.npz`, `*.egg-info/`,
+`__pycache__/`, `.pytest_cache/`, `eps/data/imagenet64/`. The 11.3 GB zip and
+the 125 MB dmg never entered history.
+
+⚠️ This entry used to recommend a bare **`data/`** in that list. That exact
+instruction is what caused **§10.17** — it also matched the source package
+`eps/data/` and kept it out of every commit for four days. It now reads
+`/data/`, anchored. If you are copying this list somewhere, copy the slash.
 
 **10.2 — venv pip.** See §3. Use `./.venv/bin/pip`, never `pip` after activate.
 
@@ -569,9 +801,20 @@ different output while `cfg.sampling` stays at its defaults.
 (0.141). Works today, emits a DeprecationWarning; migrate to a `lifespan`
 handler eventually.
 
-**10.6 — `ImageNet64` holds the whole split in RAM** as uint8: ~16 GB for the
-full 1.28M training set. Fine on a Hyak node with `--mem=180G`; will thrash a
-laptop. Use `data.max_samples` locally.
+**10.6 — `ImageNet64` holds the whole split in RAM** as uint8: **15.7 GB
+measured** for the full 1.28M training set (11 shards). Fine on a Hyak node
+with `--mem=180G`.
+
+Updated 2026-08-11: the full split *does* load and train on the 36 GB M5 Max —
+"will thrash a laptop" was too pessimistic — but it leaves the machine fully
+committed (~21 GB wired, ~6 GB compressed, <1 GB free) and leaning on swap.
+It works; it has no headroom. See the watch item in §7.0 for what to do if
+throughput decays, and **§10.18 for why this forces `num_workers: 0`** — the
+RAM-resident design and macOS spawn semantics interact badly.
+
+To be safe on a smaller machine, cap with `data.max_samples`. The loader fills
+one preallocated array shard-by-shard rather than concatenating, so peak is
+`split + one shard` (~17.3 GB), not 2× the split.
 
 **10.7 — Config rejects unknown keys** (`_build` raises `KeyError`). A typo in
 a YAML key is a hard failure, deliberately. Dotted overrides validate too.
@@ -654,6 +897,59 @@ partition changes — the failure mode is invisible on the login node.
 cuda/12.4.1` while the pip torch bundles its own CUDA 13 runtime. Now that
 10.11 is settled the line is gone: the venv's wheels carry their CUDA via
 RPATH, so no `module load cuda` is wanted at all. Do not re-add one.
+
+**10.17 — ✅ FIXED 2026-08-11. `.gitignore` silently excluded the `eps/data/`
+*source package* from every commit for four days.** The entry was a bare
+`data/`. A gitignore pattern with no leading slash matches a directory of that
+name **at any depth**, so alongside the intended dataset directory it also
+swallowed `eps/data/` — `imagenet.py` and `imagenet_classes.txt`. They were
+never committed: `git log --all --diff-filter=A -- 'eps/data/*'` was empty from
+`git init` (2026-08-07) until 2026-08-11.
+
+Consequence: the public repo `aaarvs07ranger/epsilon` was **not runnable from a
+fresh clone**. `import eps.training` → `ModuleNotFoundError: No module named
+'eps.data'`, which breaks training, `evaluate_fid.py`, and the web demo. It was
+invisible on the original machine, where the files sit untracked on disk and
+everything imports fine. It surfaced the first time the repo was cloned
+somewhere else — which was also the machine that was supposed to do the
+training.
+
+The fix is `/data/`, anchored to the repo root. **Do not remove the leading
+slash.** The comment in `.gitignore` says so; leave it there.
+
+Two general lessons, both cheap to apply:
+- After `git init` on an existing tree, run `git status --ignored --short` and
+  read what got excluded. A source file and a 16 GB dataset look identical in
+  a gitignore pattern.
+- "The tests pass" did not catch this, because the tests ran on the machine
+  that had the untracked files. **A fresh `git clone` into a temp dir plus
+  `pytest` is the only check that would have.** Worth doing before any push
+  that others (or a second machine) will clone.
+
+**10.18 — 🚫 On macOS, `data.num_workers > 0` duplicates the entire in-RAM
+dataset into every worker. Keep it at 0.** Measured 2026-08-11.
+
+macOS defaults `multiprocessing` to **spawn**, not fork (verified:
+`mp.get_start_method()` → `spawn` on Python 3.13). DataLoader workers therefore
+do **not** inherit the parent's pages copy-on-write — the `Dataset` object is
+pickled by value into each one. Verified directly: pickling an `ImageNet64`
+slice produces a blob the same size as its uint8 array (61.5 MB vs 61.4 MB).
+
+`ImageNet64` holds the whole split in RAM (§10.6), so the full 1.28M-image
+training set is **15.7 GB per worker**. `num_workers: 2` therefore wants
+15.7 x 3 = **47 GB against 36 GB of unified memory**, ~30 GB of which MPS wants
+for the GPU. The run dies at DataLoader startup — *after* the 30-minute data
+fetch, which is a slow way to find out.
+
+Reducing the worker count does not fix it; even one worker duplicates the whole
+split. `configs/train_m5.yaml` now sets `num_workers: 0`, and its comment
+explains why so nobody "optimises" it back up. The cost is ~1%: the data is
+already resident, and a step takes ~4.5 s.
+
+Note the *old* comment in that config justified `num_workers: 2` by reasoning
+about "forked worker copy-on-write growth" — correct reasoning for Linux,
+wrong platform. This never bit on Hyak (Linux, fork, and `--mem=180G` anyway).
+If Epsilon ever moves back to Linux, workers become cheap again.
 
 ---
 
@@ -804,3 +1100,112 @@ has been *planning from arithmetic and being wrong* — `gpu-a40` guessed from a
 group name, "400k steps" carried for weeks, bf16 assumed on Turing, autocast
 assumed on MPS, ~19 GB of free disk assumed on a 4 TB filesystem. Every one was
 caught only by running something. Measure first.
+
+**2026-08-11** — **First session on the M5 Max. Two blockers found and fixed,
+and the gating measurement finally taken.**
+
+*Blocker 1 — the repo did not run from a fresh clone (§10.17).* `.gitignore`
+had a bare `data/`, which matches at any depth and so excluded the **source
+package** `eps/data/` from every commit since `git init`. `imagenet.py` and
+`imagenet_classes.txt` had never been pushed; `import eps.training` failed with
+`ModuleNotFoundError: No module named 'eps.data'`. Invisible on the M4, where
+the files sit untracked on disk. Fixed the pattern to `/data/` and rebuilt the
+package from the interfaces its callers require:
+- Class names taken from the **same HF repo that produces the labels**
+  (`benjamin-paine/imagenet-1k-64x64`, `dataset_info.features`), so index
+  alignment is guaranteed rather than assumed. Its map has **1001** keys —
+  index 1000 is `'none'`, the null token — and was excluded to keep the file at
+  exactly 1000 lines. Verified 0=`tench`, 207=`golden retriever`, 979=`valley`,
+  `wc -l` = 999 (no trailing newline), matching §6.2 exactly.
+- `ImageNet64` preallocates and fills shard-by-shard rather than concatenating:
+  concatenating the full 15.7 GB split holds two copies at once (~31 GB against
+  36 GB shared with the GPU).
+- Labels that do not land in [0, 999] after the 1-based shift now raise instead
+  of silently becoming -1, which `UNLABELED` would have routed to the
+  unconditional branch — a silent corruption of class-conditional training.
+- Verified beyond "it imports": 66/66 tests, exact uint8 round-trip through
+  model space, flip, `image_size=32` rescale, missing-`labels` → UNLABELED,
+  label order preserved across a shard boundary, and real decoded images
+  rendered and eyeballed against their class names.
+
+*Blocker 2 — the venv.* The clone's `.venv` was built from the stock Xcode
+`python3` (3.9.6), below the project's 3.10 floor, and contained nothing.
+Rebuilt on 3.13.13 with `uv`. Two new gotchas recorded in §3: `uv venv` omits
+`pip` entirely (breaking the `./.venv/bin/pip` workflow §3 documents, so `pip`
+was installed into the venv explicitly), and `torch-fidelity` + `clean-fid` now
+install cleanly on Apple silicon — so FID can be computed on this machine,
+closing a gap the M4 notes list as open.
+
+*The measurement.* 92.5M U-Net, 64x64, bf16, **no** gradient checkpointing,
+global batch 256 (64 x 4 accum), 200 steps on `data/imagenet64_small`:
+
+**0.22 it/s = 56 images/s**, stable across all eight 25-step windows, loss
+1.236 -> 1.154. That is **6.8x the M4's 8.3 img/s** — inside the 5-12x band
+§7.0 predicted, so the extrapolation held for once.
+
+*Blocker 3, found while sanity-checking that measurement — and it would have
+killed the real run at startup (§10.18).* macOS defaults `multiprocessing` to
+**spawn**, not fork, so DataLoader workers get the Dataset pickled **by value**
+rather than sharing pages copy-on-write. `ImageNet64` is RAM-resident, so the
+full split is **15.7 GB per worker**: `num_workers: 2` wants 47 GB against
+36 GB. The benchmark missed it only because `max_samples=4096` made the dataset
+0.1 GB — it would have surfaced *after* the 25-minute data fetch. Note the
+config's old comment justified `num_workers: 2` by reasoning about "forked
+worker copy-on-write" — right reasoning, wrong platform, and it had never run
+on this platform at full scale. Set to 0, which costs a measured **9%**
+(0.22 -> 0.20 it/s) and is the only setting that fits.
+
+**Planning number is therefore 0.20 it/s = 51 img/s**: 50k ~ 2.9 days,
+100k ~ 5.8 days, 150k ~ 8.7 days — the pessimistic end of §7.0's old estimate,
+and now measured rather than guessed. Larger micro-batches at the same global
+batch (128 x 2, 256 x 1) were tried and are **slower**; 64 x 4 stands.
+
+*Hardening for an unattended multi-day run.* `_fid()` was already wrapped in
+try/except with the comment "FID must never kill a long training run", but
+`_preview()` — which fires every `sample_every` steps and touches the ODE
+integrator, CFG, the EMA swap and a PNG write, none of which the training step
+exercises — was **not**. One transient failure on day 4 would have ended the
+run. Guarded it the same way, for the same stated reason.
+
+*Data.* Fetched the full training split on this machine: 1,281,167 labeled
+images -> 11 npz shards, 15.7 GB, ~25 min, peak 23 GB on disk (1.7 TB free, so
+the §10.15 disk problem is simply gone). `classes present: 1000/1000`, scratch
+memmap cleaned up. **Re-verified the §6.3 ordering trap on the real data**: a
+50,000-row prefix covers **1000/1000 classes** with near-uniform counts (min
+18, median 50, max 72), so the fetcher's global shuffle works and
+`data.max_samples` / a FID prefix export are safe.
+
+*Launched.* `configs/train_m5.yaml`, 100k steps (~5.8 days), global batch 256,
+bf16, `eval.sample_every=1000` (~83 min between preview grids) and
+`logging.ckpt_every=2500` (~3.5 h, bounding crash loss; 40 checkpoints x
+1.48 GB ~ 59 GB, fine at 1.7 TB free). Detached under `caffeinate -is nohup`,
+logging to `runs/train.log`, output in `runs/m5`.
+
+Because `lr_schedule: constant`, `total_steps` sets **only** the stopping point
+— no schedule is baked in — so the run can be stopped at any checkpoint and
+extended later with
+`--resume runs/m5/ckpt_latest.pt training.total_steps=<bigger>`.
+
+**2026-08-11 (later)** — **Venue changed again: renting RunPod GPUs, and the
+goal became a U-Net vs DiT comparison.** Aarav's call, after seeing the local
+run at 4% after 5.3 hours: paying ~$40 to get both models in ~6 hours beats
+5.5 days of laptop time per model.
+
+The local run was stopped at **step 5,100 / 100,000** — 5.3 h, loss
+1.2947 → 0.1668, zero errors, `_preview` fired five times cleanly. Artifacts
+kept in `runs/m5` (4.2 GB). Not wasted: it is the only end-to-end evidence the
+training loop is correct, and its 0.21 it/s is the baseline the cloud speedup
+is measured against. Sample grids at 5.1k steps already show correct
+class-conditional colour and texture (green parrot for macaw 88, hazy landscape
+for valley 979, white fluff for arctic fox 279) — shapes not yet formed, which
+is right for 5% of training.
+
+Added `configs/train_cloud_{unet,dit}.yaml` (verified to differ **only** in the
+model block), `scripts/setup_runpod.sh`, and `scripts/eval_compare.sh`. Full
+reasoning in §7.3; the load-bearing decision is **two single-GPU processes
+instead of DDP**, because the DDP path has never been run and a rented 8-GPU
+box is a bad place to discover that.
+
+Both bash scripts syntax-check, and the exact `sample.py` invocation
+`eval_compare.sh` uses was executed against the real `runs/m5` checkpoint
+before shipping — so the CLI forms are proven, not assumed.

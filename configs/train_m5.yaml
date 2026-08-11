@@ -14,15 +14,30 @@
 #   3. Global batch 256 (64 x 4 accum), not 1024. On one device, accumulation
 #      buys nothing but wall-clock. Diffusion training is robust to batch size
 #      and LR 1e-4 is, if anything, conservative at 256.
-#   4. num_workers: 2. ImageNet64 holds the whole split in RAM as uint8
-#      (~16 GB for the full 1.28M images). Every forked worker risks
-#      copy-on-write growth against 36 GB shared with the GPU — keep it low,
-#      and note the dataloader is not the bottleneck here anyway.
+#   4. num_workers: 0 — NOT a tuning choice, a correctness one. MEASURED
+#      2026-08-11: macOS defaults multiprocessing to **spawn**, not fork, so
+#      DataLoader workers do not share the parent's pages copy-on-write; the
+#      Dataset is pickled BY VALUE into each one (verified: pickling a slice
+#      reproduces its array byte-for-byte). ImageNet64 holds the whole split
+#      in RAM as uint8, so the full 1.28M images cost 15.7 GB *per worker*:
+#      num_workers=2 would want 47 GB against 36 GB shared with the GPU and
+#      die at DataLoader startup. Lowering the count does not help — even one
+#      worker duplicates the split. Measured cost of dropping to 0: 0.20 it/s
+#      vs 0.22 with 2 workers, about **9%** — the Python overhead of 256
+#      synchronous __getitem__ calls per step. So it is not free; it is simply
+#      the only setting that fits in memory. Raise it only if ImageNet64 is
+#      changed to back its array with shared memory or a memmap, which would
+#      make workers pickle by reference — the obvious ~9% win if anyone wants
+#      it.
 #
 # MEASURED BASELINE, so you can sanity-check your own number:
-#   M4 (10-core GPU), batch 32, this model, bf16, WITH grad checkpointing:
-#   0.26 it/s = 8.3 images/s.
-# Expect the M5 Max to land somewhere around 5-12x that. VERIFY IT before
+#   M4  (10-core GPU), batch 32, bf16, WITH grad checkpointing: 0.26 it/s
+#       = 8.3 images/s.
+#   M5 Max (32-core GPU), this file, bf16, NO grad checkpointing, 200 steps
+#       on 2026-08-11: 0.22 it/s with num_workers=2, 0.20 it/s with
+#       num_workers=0 = **51 images/s** at global batch 256. Use 0.20.
+#       That is 6.2x the M4 — inside the 5-12x band that was predicted.
+# Your number should land near that. VERIFY IT before
 # trusting total_steps below — run ~200 steps and read the rate.
 #
 # If the measured rate makes 64x64 infeasible, drop data.image_size to 32
@@ -49,7 +64,7 @@ data:
   name: imagenet64
   root: data/imagenet64
   image_size: 64
-  num_workers: 2
+  num_workers: 0                 # see note 4 above — spawn duplicates the split
   horizontal_flip: true
 
 training:

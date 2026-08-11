@@ -6,7 +6,12 @@ __pycache__/
 .pytest_cache/
 
 # Data — never commit. The ImageNet zip alone is 11.3 GB.
-data/
+# NOTE: this must stay anchored with a leading slash. A bare "data/" matches a
+# directory of that name at ANY depth, which silently excluded the *source*
+# package eps/data/ from every commit from 2026-08-07 until 2026-08-11 — the
+# public repo had no dataset loaders and no imagenet_classes.txt, so a fresh
+# clone could not train, sample, evaluate, or serve the demo. See CLAUDE.md 10.17.
+/data/
 eps/data/imagenet64/
 *.zip
 *.npz
@@ -27,3 +32,6 @@ samples*.png
 .DS_Store
 .idea/
 .vscode/
+
+# Build artifacts
+*.egg-info/

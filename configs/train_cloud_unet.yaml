@@ -1,0 +1,82 @@
+# U-Net arm of the U-Net vs DiT comparison. Single CUDA GPU (RunPod H100/A100).
+#
+# PAIRED WITH configs/train_cloud_dit.yaml. Every field below is identical in
+# both files except `model:` and `logging.output_dir`. That is the whole point:
+# same data, same global batch, same step count, same LR schedule, same EMA,
+# same CFG dropout, same seed — so a difference in FID is attributable to the
+# backbone and not to the recipe. If you change a training knob here, change it
+# there too or the comparison is worthless.
+#
+# WHY SINGLE-GPU, NOT DDP: the trainer's DDP path has never actually been run
+# (Hyak was abandoned before any training happened). The single-process path
+# has hours of verified runtime behind it. Run this on GPU 0 and the DiT on
+# GPU 1 of the same box, as two independent processes:
+#
+#   CUDA_VISIBLE_DEVICES=0 python scripts/train.py --config configs/train_cloud_unet.yaml &
+#   CUDA_VISIBLE_DEVICES=1 python scripts/train.py --config configs/train_cloud_dit.yaml  &
+#
+# Model is the 92.5M U-Net (128 channels, 2 res blocks) — the same one measured
+# locally at 0.21 it/s on an M5 Max, so the cloud speedup is directly readable.
+#
+# BATCH SIZING: 128 x 2 accumulation = 256 global, chosen to be safe on 80 GB.
+# Once running, check `nvidia-smi`; if memory used is under ~45 GB, switch to
+#   training.batch_size=256 training.grad_accum_steps=1
+# for roughly 10-15% more throughput at an identical global batch.
+
+path:
+  scheduler: condot
+
+model:
+  name: unet
+  prediction: velocity
+  num_classes: 1000
+  unet:
+    in_channels: 3
+    model_channels: 128
+    channel_mult: [1, 2, 3, 4]
+    num_res_blocks: 2
+    attention_resolutions: [16, 8]
+    num_heads: 4
+    dropout: 0.1
+    gradient_checkpointing: false
+
+data:
+  name: imagenet64
+  root: data/imagenet64
+  image_size: 64
+  # Linux forks its dataloader workers, so they share the 15.7 GB split
+  # copy-on-write. This is safe HERE and would be fatal on macOS — see
+  # CLAUDE.md 10.18 before copying this value into a local config.
+  num_workers: 8
+  horizontal_flip: true
+
+training:
+  batch_size: 128
+  grad_accum_steps: 2            # 128 x 2 = 256 global, same as the local run
+  total_steps: 100000            # 25.6M images seen (~20 epochs)
+  lr: 1.0e-4
+  weight_decay: 0.0
+  warmup_steps: 5000
+  lr_schedule: constant
+  grad_clip: 1.0
+  ema_decay: 0.9999
+  cfg_dropout: 0.1
+  mixed_precision: bf16
+  seed: 0
+
+eval:
+  sample_every: 2500             # ~9 min apart at expected cloud throughput
+  sample_classes: [207, 360, 387, 88, 979, 417, 279, 972]
+  sample_guidance_scale: 4.0     # previews only; FID sweeps w in [1.0, 2.0]
+  sample_steps: 100
+  fid_every: 0
+  fid_num_samples: 10000
+  fid_reference_dir: null
+
+logging:
+  output_dir: runs/cloud_unet
+  log_every: 100
+  ckpt_every: 10000              # ~35 min apart; 10 checkpoints x 1.4 GB
+  wandb: false                   # set true only if you pip install + login wandb
+  wandb_project: epsilon
+  wandb_run_name: cloud-unet-cfm

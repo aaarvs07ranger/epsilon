@@ -1,0 +1,78 @@
+# DiT arm of the U-Net vs DiT comparison. Single CUDA GPU (RunPod H100/A100).
+#
+# PAIRED WITH configs/train_cloud_unet.yaml. Every field below is identical in
+# both files except `model:` and `logging.output_dir`. Keep it that way — the
+# comparison is only meaningful if the recipe is held fixed.
+#
+# DiT-B/4 at 64x64 -> 16x16 = 256 tokens, 130.4M params. Note this is 1.4x the
+# U-Net arm's 92.5M; the two architectures do not offer a clean equal-parameter
+# pairing at these standard sizes, so say "DiT-B/4 vs a 92.5M ADM-style U-Net"
+# in the writeup rather than implying a matched-capacity comparison.
+#
+# This is PIXEL-space DiT (in_channels 3, input_size 64) — no VAE in the loop,
+# same as the U-Net arm. Do not switch it to latent space for this comparison.
+#
+# Caveat worth stating in the writeup: DiT is known to want LONGER training
+# than a U-Net to reach the same FID — the original config here budgeted 600k
+# steps against the U-Net's 400k. At a matched 100k steps the U-Net is expected
+# to win, and that result says "at this compute budget", NOT "DiT is worse".
+
+path:
+  scheduler: condot
+
+model:
+  name: dit
+  prediction: velocity
+  num_classes: 1000
+  dit:
+    in_channels: 3
+    input_size: 64
+    patch_size: 4
+    hidden_size: 768
+    depth: 12
+    num_heads: 12
+    mlp_ratio: 4.0
+    dropout: 0.0
+    cross_attention: false       # class-conditional AdaLN-Zero only (Remark 29)
+    gradient_checkpointing: false
+
+data:
+  name: imagenet64
+  root: data/imagenet64
+  image_size: 64
+  # Linux forks its dataloader workers, so they share the 15.7 GB split
+  # copy-on-write. This is safe HERE and would be fatal on macOS — see
+  # CLAUDE.md 10.18 before copying this value into a local config.
+  num_workers: 8
+  horizontal_flip: true
+
+training:
+  batch_size: 128
+  grad_accum_steps: 2            # 128 x 2 = 256 global, matched to the U-Net arm
+  total_steps: 100000            # 25.6M images seen (~20 epochs)
+  lr: 1.0e-4
+  weight_decay: 0.0
+  warmup_steps: 5000
+  lr_schedule: constant
+  grad_clip: 1.0
+  ema_decay: 0.9999
+  cfg_dropout: 0.1
+  mixed_precision: bf16
+  seed: 0
+
+eval:
+  sample_every: 2500
+  sample_classes: [207, 360, 387, 88, 979, 417, 279, 972]
+  sample_guidance_scale: 4.0
+  sample_steps: 100
+  fid_every: 0
+  fid_num_samples: 10000
+  fid_reference_dir: null
+
+logging:
+  output_dir: runs/cloud_dit
+  log_every: 100
+  ckpt_every: 10000
+  wandb: false
+  wandb_project: epsilon
+  wandb_run_name: cloud-dit-b4-cfm
