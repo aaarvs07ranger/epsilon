@@ -38,43 +38,91 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(title="Epsilon", docs_url="/api/docs")
 
-_state: dict = {"net": None, "cfg": None, "path": None, "device": None}
+# One entry per loaded backbone, keyed by a short slug ("unet", "dit"). Holding
+# both at once is what lets the demo A/B the two architectures on an identical
+# prompt and seed — the project's headline comparison, made interactive.
+_models: dict[str, dict] = {}
 _lock = threading.Lock()  # one generation at a time; MPS/CUDA context safety
 _class_names = imagenet_class_names()
 
 
-def _load_checkpoint() -> None:
-    ckpt_path = os.environ.get("EPSILON_CKPT", "")
-    if not ckpt_path or not Path(ckpt_path).exists():
-        print(f"[epsilon-web] no checkpoint at '{ckpt_path or '(unset)'}' — demo mode")
-        return
-    device = torch.device(
+def _pick_device() -> torch.device:
+    return torch.device(
         "cuda" if torch.cuda.is_available()
         else "mps" if torch.backends.mps.is_available()
         else "cpu"
     )
+
+
+def _load_one(ckpt_path: str, device: torch.device) -> Optional[dict]:
+    """Load a single checkpoint into a model entry, or None if unusable."""
+    if not ckpt_path or not Path(ckpt_path).exists():
+        print(f"[epsilon-web] skipping '{ckpt_path or '(unset)'}' — not found")
+        return None
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     cfg = from_dict(ckpt["config"])
     size = cfg.data.image_size // 8 if cfg.training.latent_space else cfg.data.image_size
     net = build_model(cfg.model, size).to(device)
     net.load_state_dict(ckpt["model"])
+    # Slim inference exports (scripts/export_inference_ckpt.py) fold the EMA
+    # weights into "model" and omit this key; training checkpoints carry it.
     if "ema" in ckpt:
         ema = EMA(net)
         ema.load_state_dict(ckpt["ema"])
         ema.copy_to(net)
     net.eval()
-    _state.update(
-        net=net,
-        cfg=cfg,
-        path=GaussianProbabilityPath(build_scheduler(cfg.path.scheduler)),
-        device=device,
-    )
-    print(f"[epsilon-web] loaded {ckpt_path} (step {ckpt.get('step', '?')}) on {device}")
+    step = ckpt.get("step")
+    return {
+        "net": net,
+        "cfg": cfg,
+        "path": GaussianProbabilityPath(build_scheduler(cfg.path.scheduler)),
+        "device": device,
+        "arch": cfg.model.name,
+        "step": step,
+        "params": sum(p.numel() for p in net.parameters()),
+        "source": ckpt_path,
+    }
+
+
+def _load_models() -> None:
+    """Load every checkpoint named by EPSILON_MODELS (or EPSILON_CKPT).
+
+    EPSILON_MODELS is a comma-separated list of checkpoint paths; labels are
+    derived from each checkpoint's own config, so nothing has to be kept in
+    sync by hand:
+
+        EPSILON_MODELS="deploy/unet_60k.pt,deploy/dit_100k.pt"
+
+    EPSILON_CKPT (single path) still works and is appended to the list.
+    """
+    paths = [p.strip() for p in os.environ.get("EPSILON_MODELS", "").split(",") if p.strip()]
+    single = os.environ.get("EPSILON_CKPT", "").strip()
+    if single and single not in paths:
+        paths.append(single)
+    if not paths:
+        print("[epsilon-web] no EPSILON_MODELS / EPSILON_CKPT set — demo mode (UI loads, /api/generate 503s)")
+        return
+
+    device = _pick_device()
+    for p in paths:
+        entry = _load_one(p, device)
+        if entry is None:
+            continue
+        key = entry["arch"]
+        if key in _models:  # two of the same architecture: disambiguate by step
+            key = f"{key}-{entry['step']}"
+        _models[key] = entry
+        print(
+            f"[epsilon-web] loaded '{key}': {entry['arch']} "
+            f"{entry['params'] / 1e6:.1f}M params, step {entry['step']}, on {device}"
+        )
+    if not _models:
+        print("[epsilon-web] every checkpoint failed to load — demo mode")
 
 
 @app.on_event("startup")
 def _startup() -> None:
-    _load_checkpoint()
+    _load_models()
 
 
 def resolve_class(prompt: str) -> tuple[int, str]:
@@ -107,6 +155,7 @@ def resolve_class(prompt: str) -> tuple[int, str]:
 class GenerateRequest(BaseModel):
     prompt: Optional[str] = None
     class_id: Optional[int] = Field(default=None, ge=0, le=999)
+    model: Optional[str] = None  # "unet" | "dit"; default = first loaded
     method: str = Field(default="ode", pattern="^(ode|sde)$")
     parameterization: str = Field(default="velocity", pattern="^(velocity|score)$")
     solver: str = Field(default="euler", pattern="^(euler|heun)$")
@@ -116,14 +165,33 @@ class GenerateRequest(BaseModel):
     seed: Optional[int] = None
 
 
+_ARCH_LABEL = {"unet": "U-Net", "dit": "DiT-B/4"}
+
+
+def _describe(key: str, m: dict) -> dict:
+    step = m["step"]
+    return {
+        "key": key,
+        "label": _ARCH_LABEL.get(m["arch"], m["arch"]),
+        "arch": m["arch"],
+        "params_m": round(m["params"] / 1e6, 1),
+        "step": step,
+        "steps_label": f"{step // 1000}k steps" if isinstance(step, int) else "",
+        "prediction": m["cfg"].model.prediction,
+    }
+
+
 @app.get("/api/health")
 def health() -> dict:
-    ready = _state["net"] is not None
+    ready = bool(_models)
+    first = next(iter(_models.values()), None)
     return {
         "ready": ready,
-        "device": str(_state["device"]) if ready else None,
-        "model": _state["cfg"].model.name if ready else None,
-        "prediction": _state["cfg"].model.prediction if ready else None,
+        "device": str(first["device"]) if first else None,
+        "models": [_describe(k, m) for k, m in _models.items()],
+        # kept for older clients
+        "model": first["arch"] if first else None,
+        "prediction": first["cfg"].model.prediction if first else None,
     }
 
 
@@ -134,8 +202,8 @@ def classes() -> list[dict]:
 
 @app.post("/api/generate")
 def generate(req: GenerateRequest) -> dict:
-    if _state["net"] is None:
-        raise HTTPException(503, "No checkpoint loaded (set EPSILON_CKPT and restart)")
+    if not _models:
+        raise HTTPException(503, "No checkpoint loaded (set EPSILON_MODELS and restart)")
     if req.class_id is not None:
         class_id, class_name = req.class_id, _class_names[req.class_id]
     elif req.prompt:
@@ -143,7 +211,11 @@ def generate(req: GenerateRequest) -> dict:
     else:
         raise HTTPException(400, "Provide 'prompt' or 'class_id'")
 
-    cfg, net, path, device = _state["cfg"], _state["net"], _state["path"], _state["device"]
+    key = req.model or next(iter(_models))
+    if key not in _models:
+        raise HTTPException(404, f"Unknown model '{key}'. Loaded: {', '.join(_models)}")
+    entry = _models[key]
+    cfg, net, path, device = entry["cfg"], entry["net"], entry["path"], entry["device"]
     seed = req.seed if req.seed is not None else int.from_bytes(os.urandom(4), "little")
     in_ch = cfg.model.unet.in_channels if cfg.model.name == "unet" else cfg.model.dit.in_channels
     size = cfg.data.image_size // 8 if cfg.training.latent_space else cfg.data.image_size
@@ -170,6 +242,8 @@ def generate(req: GenerateRequest) -> dict:
         "image": "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode(),
         "class_id": class_id,
         "class_name": class_name,
+        "model": key,
+        "model_label": _ARCH_LABEL.get(entry["arch"], entry["arch"]),
         "seed": seed,
         "method": req.method,
         "parameterization": req.parameterization,

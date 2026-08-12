@@ -94,6 +94,17 @@
   }
   @keyframes r { to { transform: rotate(360deg); } }
   .err { color: #b3462e; font-size: 0.9rem; }
+  .dice {
+    margin-top: 0.5rem; width: 100%; font-size: 0.82rem; padding: 0.4rem;
+  }
+  /* Side-by-side comparison: same prompt, same seed, both backbones. */
+  .versus { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
+  .versus figure { margin: 0; text-align: center; }
+  .versus img { width: 240px; height: 240px; border-radius: 8px; image-rendering: pixelated; border: 1px solid var(--line); }
+  .versus figcaption { font-size: 0.8rem; color: var(--muted); padding-top: 0.35rem; }
+  .versus figcaption b { color: var(--ink); font-weight: 600; }
+  .fade-in { animation: fi 0.35s ease both; }
+  @keyframes fi { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
 </style>
 </head>
 <body>
@@ -116,6 +127,12 @@
         <input type="text" id="prompt" placeholder="a golden retriever" list="class-list">
         <datalist id="class-list"></datalist>
         <div class="hint" id="match-hint"></div>
+        <button class="ghost dice" id="surprise" type="button">🎲 Surprise me</button>
+
+        <div id="model-wrap" hidden>
+          <label>Backbone</label>
+          <div class="seg" id="model"></div>
+        </div>
 
         <label>Generative process</label>
         <div class="seg" id="method">
@@ -140,6 +157,7 @@
           <input type="range" id="steps" min="10" max="500" step="10" value="100">
           <output id="steps-out">100</output>
         </div>
+        <div class="hint" id="steps-hint"></div>
 
         <div id="sigma-wrap" style="display:none">
           <label>Diffusion coefficient σ</label>
@@ -278,7 +296,8 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
-const state = { method: "ode", param: "velocity", classes: [] };
+const state = { method: "ode", param: "velocity", solver: "euler", device: "",
+                classes: [], models: [], model: null };
 
 /* ---------- tabs ---------- */
 document.querySelectorAll("nav button").forEach((b) => {
@@ -317,13 +336,40 @@ for (const [id, out, fmt] of [["guidance", "guidance-out", (v) => v],
   $("#" + id).oninput = () => ($("#" + out).textContent = fmt($("#" + id).value));
 }
 
-/* ---------- health + classes ---------- */
+/* ---------- health + model picker ---------- */
 fetch("/api/health").then((r) => r.json()).then((h) => {
   if (!h.ready) {
     const b = $("#banner");
     b.style.display = "block";
     b.textContent = "No trained checkpoint is loaded on the server — generation is disabled. " +
-                    "Set EPSILON_CKPT and restart to enable it.";
+                    "Set EPSILON_MODELS and restart to enable it.";
+    return;
+  }
+  const models = h.models || [];
+  state.models = models;
+  state.model = models.length ? models[0].key : null;
+  state.device = h.device || "";
+  // On a CPU-only host (e.g. a free Spaces tier) 100 Euler steps is minutes per
+  // image. Heun is 2nd-order, so 30 Heun steps ≈ 60 function evaluations and
+  // looks far better than 30 Euler ones at similar cost. Default accordingly
+  // and say so, rather than letting a visitor conclude the model is broken.
+  if (state.device.startsWith("cpu")) {
+    state.solver = "heun";
+    $("#steps").value = 30;
+    $("#steps-out").textContent = 30;
+    $("#steps-hint").textContent =
+      "Running on CPU — defaulting to 30 Heun steps (~2nd-order). Higher is sharper but slower.";
+  }
+  // Only worth showing the control when there is an actual choice to make.
+  if (models.length > 1) {
+    const opts = models.map((m) =>
+      `<button data-v="${m.key}">${m.label} <span style="opacity:.7">${m.params_m}M</span></button>`);
+    // The interesting one: same prompt, same seed, both backbones side by side.
+    opts.push(`<button data-v="both">Compare</button>`);
+    $("#model").innerHTML = opts.join("");
+    $("#model").querySelector("button").classList.add("active");
+    seg("model", "model");
+    $("#model-wrap").hidden = false;
   }
 });
 fetch("/api/classes").then((r) => r.json()).then((cs) => {
@@ -336,30 +382,68 @@ $("#prompt").addEventListener("input", () => {
   $("#match-hint").textContent = hit ? `→ class ${hit.id}: ${hit.name}` : "";
 });
 
+/* ---------- surprise me ---------- */
+$("#surprise").onclick = () => {
+  if (!state.classes.length) return;
+  const c = state.classes[Math.floor(Math.random() * state.classes.length)];
+  $("#prompt").value = c.name;
+  $("#prompt").dispatchEvent(new Event("input"));
+};
+
 /* ---------- generation ---------- */
+async function callGenerate(body) {
+  const r = await fetch("/api/generate", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(((await r.json()) || {}).detail || r.statusText);
+  return r.json();
+}
+const caption = (d) =>
+  `${d.class_name} · ${d.method.toUpperCase()} · ${d.parameterization} · w=${d.guidance_scale} · ${d.num_steps} steps · seed ${d.seed}`;
+
 $("#go").onclick = async () => {
   const btn = $("#go"), res = $("#result");
+  const compare = state.model === "both";
   btn.disabled = true;
-  res.innerHTML = `<div class="spin"></div><p class="meta">Integrating the ${state.method.toUpperCase()} — ${$("#steps").value} steps…</p>`;
+  res.innerHTML = `<div class="spin"></div><p class="meta">Integrating the ${state.method.toUpperCase()} — ${$("#steps").value} steps${compare ? " × 2 backbones" : ""}…</p>`;
   try {
-    const body = {
+    const base = {
       prompt: $("#prompt").value || null,
       method: state.method,
       parameterization: state.param,
+      solver: state.solver,
       guidance_scale: +$("#guidance").value,
       num_steps: +$("#steps").value,
       sigma: +$("#sigma").value,
       seed: $("#seed").value === "" ? null : +$("#seed").value,
     };
-    const r = await fetch("/api/generate", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    const d = await r.json();
-    const label = `${d.class_name} · ${d.method.toUpperCase()} · ${d.parameterization} · w=${d.guidance_scale} · ${d.num_steps} steps · seed ${d.seed}`;
+
+    if (compare) {
+      // Pin the seed client-side so both backbones start from *identical*
+      // noise — otherwise you are comparing two random draws, not two models.
+      const seed = base.seed ?? Math.floor(Math.random() * 2 ** 31);
+      const keys = state.models.map((m) => m.key);
+      const outs = [];
+      for (const k of keys) outs.push(await callGenerate({ ...base, seed, model: k }));
+      res.innerHTML = `
+        <div class="versus fade-in">${outs.map((d) => `
+          <figure>
+            <img src="${d.image}" alt="${d.class_name}">
+            <figcaption><b>${d.model_label}</b></figcaption>
+          </figure>`).join("")}
+        </div>
+        <div class="meta">${caption(outs[0])} · same noise, both backbones</div>
+        <div class="row">${outs.map((d) => `
+          <a class="ghost" download="epsilon_${d.model}_${d.class_id}_${d.seed}.png" href="${d.image}">Download ${d.model_label}</a>`).join("")}
+        </div>`;
+      return;
+    }
+
+    const d = await callGenerate({ ...base, model: state.model });
+    const label = caption(d) + (d.model_label ? ` · ${d.model_label}` : "");
     res.innerHTML = `
-      <img src="${d.image}" alt="${d.class_name}">
+      <img class="fade-in" src="${d.image}" alt="${d.class_name}">
       <div class="meta">${label}</div>
       <div class="row">
         <a class="ghost" download="epsilon_${d.class_id}_${d.seed}.png" href="${d.image}">Download</a>

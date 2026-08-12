@@ -18,85 +18,61 @@
 
 ## 1. Status board
 
-**Last updated: 2026-08-11, ~15:05 pod-time (22:05 PT) — training in flight on RunPod.**
+**Last updated: 2026-08-12 — 🎉 BOTH MODELS TRAINED. Pod terminated, results local.**
 
 | Area | State |
 |---|---|
-| Math core (`paths`, `losses`, samplers) | ✅ Complete, 66 tests pass (4.7 s M5 Max / 5.7 s RunPod) |
-| Models (U-Net 273.0M, DiT-B/4 130.4M, 92.5M small) | ✅ Complete, verified on `meta` device |
-| Trainer (DDP, EMA, AMP, ckpt, resume) | ✅ Single-GPU path proven on CUDA + MPS; `_preview` guarded. **DDP still never executed** |
-| `eps/data/` package | ✅ **Reconstructed + pushed 2026-08-11** — had never been committed (§10.17) |
-| Web demo (FastAPI + SPA) | ✅ Complete, loads without a checkpoint |
-| Git / GitHub | ⚠️ `eps/data/` **is** pushed (repo finally runnable from a clone). **2 local commits unpushed** — see actions |
-| **Execution venue** | ▶️ **RunPod, 2× RTX PRO 6000 Blackwell** — live now (§7.4) |
-| M5 Max | ⏸️ Local run stopped at step 5,100 (loss 1.29→0.167). Artifacts in `runs/m5` (4.2 GB). Still the dev box |
+| Math core (`paths`, `losses`, samplers) | ✅ Complete, 66 tests pass |
+| **Trained models** | ✅ **U-Net 92.5M @60k steps · DiT-B/4 130.4M @100k steps.** In `runs/cloud_{unet,dit}/` |
+| Sample grids | ✅ 9 grids in `results/` + 64 training previews in `runs/cloud_*/previews/` |
+| Trainer | ✅ Single-GPU path proven on CUDA + MPS. **DDP still never executed** |
+| `eps/data/` package | ✅ Reconstructed + pushed 2026-08-11 (§10.17) |
+| **Web demo** | ✅ **Upgraded 2026-08-12**: loads *both* backbones, has a Compare mode (same seed, both models), CPU-adaptive defaults (§9) |
+| **Deployment weights** | ✅ `deploy/*.pt` — EMA-folded fp16, **8× smaller** (1.48 GB → 185 MB), verified against reference (§9.1) |
+| **Hosting** | ⏳ Files written and tested (`deploy/space/`, `deploy/DEPLOY.md`); **needs Aarav's HF account to push** |
+| README | ✅ Rewritten 2026-08-12 with real results and honest limitations |
+| Git / GitHub | ⚠️ several local commits unpushed — SSH key now exists, see actions |
+| RunPod | ⛔ **Pod terminated 2026-08-12.** Total spend ~$49 of $60. Nothing left on it |
+| M5 Max | Local dev box. Aborted run kept in `runs/m5` (4.2 GB) as the correctness witness |
 | Hyak (rao) | ⛔ Abandoned (§10.14/§10.15) |
-| Measured throughput | ✅ **RunPod: U-Net 1.64 it/s, DiT 3.20 it/s.** M5 Max 0.21. **DiT is 2× faster than the smaller U-Net** (§7.4) |
-| Dataset | ✅ Full 1,281,167 train + 50,000 val fetched **on the pod**, 1000/1000 classes, shuffle verified |
-| **Training run** | ▶️ **IN FLIGHT.** U-Net → 60k steps (~10 h), DiT → 100k (~8 h). Started ~14:57 / 14:32 pod-time |
-| **FID < 12 target** | 🔴 Dead. Not reachable at any tier in play — §7.2. Restate honestly |
-| FID reference set | ⏳ Exported by `eval_compare.sh` at the end (val split, §8) |
-| Public demo deployment | ⏳ Not started — can ship before training finishes (§9) |
+| Measured throughput | ✅ U-Net 1.64 it/s, DiT 3.20 it/s. **The bigger model is 2× faster** (§7.4) |
+| **FID** | ⏳ **Not computed** — deliberately skipped to protect the GPU budget. Runs free locally (§8) |
+| **Slides deck** | 📌 **Requested 2026-08-12, not started** — see §13 |
 
 Local-only convenience: `data/imagenet64_small` — 20k images but **only 16
 classes** (fish/sharks; `--limit` takes a class prefix, §6.3). Smoke tests only.
-Re-fetched on the M5 Max 2026-08-11.
 
-### Immediate next actions — the morning-after runbook
+### The result, in one line
 
-**Both arms are training right now on the pod (§7.4).** Nothing to do until
-they finish. Aarav is away until the morning of 2026-08-12. Expected completion:
-DiT ~22:40 PT, U-Net ~01:00 PT, i.e. both done well before morning.
+Two class-conditional 64×64 generators trained from scratch for ~$49, with
+recognisable golden retrievers, macaws, red pandas and balloons. At **matched**
+60k steps the U-Net is visibly sharper than the DiT — expected, since DiT wants
+longer training — while training at **half** the DiT's speed. Both facts are
+measured and both belong in the writeup.
 
-**Check progress from the laptop, any time, one line** (note `-n 2`, not `-2` —
-§10.20):
+### Immediate next actions
 
-```bash
-ssh -p 27225 -i ~/.ssh/id_ed25519 root@82.221.170.234 \
-  "tail -n 2 /workspace/epsilon/runs/unet.log /workspace/epsilon/runs/dit.log"
-```
+Training is done and the compute is switched off. Everything remaining is
+writing, shipping, and presenting.
 
-Then, in order:
-
-1. **Confirm both finished.** Targets: U-Net **60000**, DiT **100000**. Both
-   stop by themselves — `total_steps` is set, no babysitting needed.
-2. **Run the evaluation** (~2.5 h, §8). The `DIT=` override is what keeps the
-   comparison matched — it evaluates DiT at the same 60k steps the U-Net
-   reached, instead of its 100k checkpoint:
+1. **Push.** Several commits sit local. An SSH key now exists at
+   `~/.ssh/id_ed25519`; add it at github.com → Settings → SSH keys, then:
    ```bash
-   ssh -p 27225 -i ~/.ssh/id_ed25519 root@82.221.170.234
-   cd /workspace/epsilon
-   DIT=runs/cloud_dit/ckpt_0060000.pt bash scripts/eval_compare.sh
+   git remote set-url origin git@github.com:aaarvs07ranger/epsilon.git
+   git push origin main
    ```
-3. **Download everything, then terminate the pod.** ⛔ The volume is deleted
-   with the pod — this is the only step where work can actually be lost. From
-   a *laptop* terminal, not the SSH session:
-   ```bash
-   cd ~/Desktop
-   scp -P 27225 -i ~/.ssh/id_ed25519 -r \
-       root@82.221.170.234:/workspace/epsilon/results .
-   scp -P 27225 -i ~/.ssh/id_ed25519 \
-       root@82.221.170.234:/workspace/epsilon/runs/cloud_unet/ckpt_latest.pt unet.pt
-   scp -P 27225 -i ~/.ssh/id_ed25519 \
-       root@82.221.170.234:/workspace/epsilon/runs/cloud_dit/ckpt_latest.pt dit.pt
-   # worth grabbing too: the DiT@100k bonus checkpoint and all preview grids
-   scp -P 27225 -i ~/.ssh/id_ed25519 -r \
-       root@82.221.170.234:/workspace/epsilon/runs/cloud_unet/previews unet_previews
-   scp -P 27225 -i ~/.ssh/id_ed25519 -r \
-       root@82.221.170.234:/workspace/epsilon/runs/cloud_dit/previews dit_previews
-   ```
-   Then RunPod dashboard → pod → **⋮ → Terminate** (not Stop — a stopped pod
-   still bills for storage).
-4. **`git push origin main`** — 2 commits still local (`3187354` curl
-   bootstrap, `77f4f68` cache pinning), plus whatever this session adds. An
-   SSH key now exists at `~/.ssh/id_ed25519`; add it to GitHub and use
-   `git remote set-url origin git@github.com:aaarvs07ranger/epsilon.git`.
-5. **Deploy the web demo** (§9) — ZeroGPU on HF Spaces, UI labelled as 1000
-   ImageNet classes (§11: it is not text-to-image).
-6. **Restate the target honestly** (§7.2) and write up the results with the
-   §6.4 repack caveat and the compute disclosed.
-7. **Revise the explainer artifact** (§2) — stale since 2026-08-08, and
-   everything from 2026-08-11 adds to it.
+2. **Deploy the demo** — everything is written and locally verified; it needs
+   an HF account to push. Follow `deploy/DEPLOY.md`: create a model repo for
+   the two fp16 weights, create a Docker Space from `deploy/space/`. Free tier
+   works (the UI detects CPU and drops to 30 Heun steps); ZeroGPU is one
+   Dockerfile line away.
+3. **Build the 25-minute slide deck** — §13 has the outline, the demo beats,
+   and which assets to use. Requested 2026-08-12.
+4. **Optionally compute FID locally** (§8) — free, just slow, and it would turn
+   the qualitative U-Net-vs-DiT claim into a number. `NUM=5000` keeps it
+   overnight-sized on an M5 Max.
+5. **Revise the explainer artifact** (§2) — stale since 2026-08-08, and
+   everything since adds to it.
 
 ---
 
@@ -869,33 +845,79 @@ swallows exceptions by design — FID must never kill a long run, and as of
 ## 9. Sampling & web demo
 
 ```bash
-./.venv/bin/python scripts/sample.py --ckpt runs/unet64/ckpt_latest.pt \
-    --classes 207 88 979 417 --guidance 4 --method ode
+./.venv/bin/python scripts/sample.py --ckpt runs/cloud_unet/ckpt_final.pt \
+    --classes 207 88 979 417 --guidance 3 --method ode
 
-EPSILON_CKPT=runs/unet64/ckpt_latest.pt \
+# the demo, with BOTH trained backbones loaded
+EPSILON_MODELS="deploy/unet_60k.pt,deploy/dit_100k.pt" \
     ./.venv/bin/uvicorn eps.web.app:app --host 0.0.0.0 --port 7860
 ```
 
-The SPA lets a visitor type a prompt (**fuzzy-matched to one of 1000 ImageNet
-classes** — this is not text-to-image, see §11), choose ODE vs SDE, velocity vs
-score, guidance scale, and step count. Without a checkpoint the UI still loads
-and `/api/generate` returns 503 — deployable before training finishes.
+### 9.0 What the demo does (upgraded 2026-08-12)
 
-**Free deployment target: Hugging Face Spaces on ZeroGPU** (free, GPU-backed,
-queued). Decided 2026-08-11.
+The SPA takes a prompt (**fuzzy-matched to one of 1000 ImageNet classes** —
+this is not text-to-image, §11), and exposes ODE vs SDE, velocity vs score,
+guidance scale, step count, σ, and seed. Without a checkpoint the UI still
+loads and `/api/generate` returns 503, so it is deployable before any model
+exists.
 
-⚠️ **The free CPU tier is not viable as configured.** A 92.5M U-Net at 100 ODE
-steps with CFG is ~200 forward passes per image; on 2 vCPU that is minutes per
-image. If you must run CPU-only, drop `sampling.solver` to Heun at ~20 steps
-(Heun is 2nd-order, so 20 Heun steps ≈ 40 function evals and looks far better
-than 20 Euler steps). Otherwise use ZeroGPU and keep 100 steps.
+Three things were added on 2026-08-12:
 
-Deploy anywhere a Python process runs: `pip install -e .[web]`, set
-`EPSILON_CKPT`, run uvicorn.
+- **Multi-model loading.** `EPSILON_MODELS` takes a comma-separated list of
+  checkpoints; labels are derived from each checkpoint's own embedded config,
+  so nothing has to be kept in sync by hand. `EPSILON_CKPT` still works and is
+  appended to the list. `_models` is a dict keyed by architecture slug; two
+  checkpoints of the same architecture are disambiguated by step.
+- **Compare mode.** Generates from every loaded backbone at the **same seed**
+  and shows them side by side. The seed is pinned client-side before the
+  requests go out — otherwise you are comparing two random draws, not two
+  models. This is the project's headline result made clickable, and it is the
+  single best thing to demo live.
+- **CPU-adaptive defaults.** `/api/health` reports the device; if it is CPU the
+  UI drops to 30 **Heun** steps and says so in a hint. Heun is 2nd-order, so 30
+  Heun steps ≈ 60 function evaluations and looks far better than 30 Euler ones
+  at similar cost. This is what makes the free Spaces tier usable rather than
+  "minutes per image".
 
-**Label the UI honestly.** It should say the model generates from 1000 ImageNet
-classes at 64x64. A visitor who types a scene description and gets one object
-will otherwise read the demo as broken rather than as scoped.
+Verified end to end on 2026-08-12: both models load on MPS, `/api/health`
+reports them, generation works per-model, `model: "nope"` is rejected with a
+clear 404, and the sde+score+heun path runs.
+
+### 9.1 Deployment weights — strip before shipping
+
+A training checkpoint holds four copies of the network (live, EMA, and two Adam
+moments). Inference needs one. `scripts/export_inference_ckpt.py` folds the EMA
+weights into `model`, drops `optimizer`/`scaler`/`ema`, and casts to fp16:
+
+| | full | slim |
+|---|---|---|
+| U-Net 92.5M | 1.48 GB | **185 MB** |
+| DiT-B/4 130.4M | 2.09 GB | **261 MB** |
+
+8× in both cases. **Verified, not assumed:** rebuilding both models from the
+slim files and diffing against the EMA-applied reference gives a worst-case
+weight deviation of 1.8e-3 (U-Net) / 1.9e-3 (DiT) against values spanning ±4.8
+— pure fp16 rounding. `_load_checkpoint` applies EMA only when an `ema` key is
+present, which is why folding it in and omitting the key is safe.
+
+### 9.2 Hosting
+
+Everything is written and locally tested in `deploy/`; it needs an HF account
+to actually push. `deploy/DEPLOY.md` is the runbook. Shape of it:
+
+- Weights → a HF **model** repo (not the Space: Spaces are for code, and this
+  way a weight swap does not force a rebuild).
+- App → a **Docker** Space from `deploy/space/` (Gradio/Streamlit templates do
+  not fit a FastAPI + static-HTML app). The Dockerfile pip-installs the package
+  from GitHub at build time and `start.sh` pulls the weights at container
+  start, so shipping a code change is a push plus a Space restart.
+- Free CPU tier works given the adaptive defaults above. For **ZeroGPU**, set
+  the hardware and delete the `--index-url .../whl/cpu` line so pip resolves
+  the CUDA build; the app picks up CUDA on its own.
+
+**Label the UI honestly.** It says 1000 ImageNet classes at 64×64. A visitor
+who types a scene description and gets one object should read the demo as
+scoped, not broken.
 
 ---
 
@@ -1450,3 +1472,83 @@ with CFG doubling the NFE. Fixed in §8 and in the script header.
 *Still true and still the biggest risk:* the pod's volume is deleted on
 terminate. Everything must be `scp`'d off first. That is the only step in this
 whole plan where work can be irrecoverably lost.
+
+**2026-08-12** — **Both models trained. Pod terminated. Project has results.**
+
+Overnight both arms finished cleanly: U-Net `ckpt_final.pt` at 60k, DiT at
+100k, no errors, `_preview` fired throughout. Generated the 9 sample grids on
+the pod, pulled 5.3 GB down, verified, terminated. **Total spend ~$49 of $60.**
+
+*The samples are better than predicted.* I told Aarav to expect "rough shapes
+and colours"; the actual output has recognisable golden retrievers, vivid
+macaws, red pandas, hot-air balloons and arctic foxes. Underpromising was the
+right error to make, but worth recording that 60k steps at 92.5M on 64×64 gets
+further than I expected.
+
+*The matched comparison, qualitatively:* at 60k steps each, **the U-Net is
+visibly better** — sharper macaws, cleaner red pandas, more coherent balloons;
+the DiT's dogs are comparable but its other classes are blobbier. Exactly what
+§7.3 predicted. Combined with §7.4's throughput inversion, the project now has
+two honest measured findings that point in opposite directions, which is a far
+more interesting result than either alone.
+
+*Skipped FID deliberately.* With $11 left and the sweep costing ~2.5 h ≈ $10.5,
+running it risked the pod terminating mid-eval and taking the models. Chose
+models over numbers. FID runs free locally whenever wanted.
+
+*Delivery work, all verified rather than assumed:*
+- Moved everything into the repo: `runs/cloud_*/` (gitignored, 9.4 GB) and
+  `results/` (tracked, 1.3 MB of grids, used by the README).
+- Wrote `scripts/export_inference_ckpt.py` → §9.1. 8× smaller, diffed against
+  the EMA reference to prove it.
+- Upgraded the web app to load both backbones with a **Compare** mode at
+  matched seed, plus CPU-adaptive Heun defaults → §9.0. Tested live.
+- Wrote `deploy/space/` (Dockerfile, start.sh, Space README) and
+  `deploy/DEPLOY.md` → §9.2. Cannot be pushed without Aarav's HF account.
+- Rewrote `README.md` around the actual results, with an honest-limitations
+  section. **Fixed its opening line, which claimed "text-to-image"** — the same
+  error §11 exists to prevent, sitting in the most-read file in the repo.
+
+---
+
+## 13. The capstone presentation (requested 2026-08-12, not started)
+
+Aarav wants a **Google Slides deck, ~25 minutes, with live demos woven in.**
+Not started; this section is the brief so a later session can pick it up cold.
+
+**Assets that already exist and should be used:**
+
+| Asset | Where | Good for |
+|---|---|---|
+| 9 sample grids (guidance sweep, SDE, score) | `results/` | the payoff slides |
+| 64 training previews, every 2500 steps | `runs/cloud_*/previews/` | an animated "learning over time" build |
+| Loss + throughput logs | `runs/{unet,dit}.log` | training-curve plot |
+| Equation → code table | `README.md` | the verification-discipline slide |
+| Explainer artifact (⚠️ stale) | §2 | zoom-ladder framing, if revised first |
+
+**The three things that make this stand out**, and which the deck should be
+built around rather than burying:
+1. **Verification discipline** — every closed-form expression checked against
+   an independent construction *before* anything was trained. This is the
+   actual contribution; the pictures follow from it.
+2. **The throughput inversion** — the 130.4M DiT trains 2× faster than the
+   92.5M U-Net, with the arithmetic-intensity explanation and the rejected
+   launch-bound hypothesis (§7.4). Real measured engineering.
+3. **Honest scoping** — FID<12 shown to be unfunded by arithmetic, target
+   restated, and the "text-to-image" framing rejected on the evidence (§11).
+
+**Live demo beats**, in rising order of impact — rehearse offline as a fallback,
+since the free tier will be slow and a queue mid-talk is a bad look:
+- generate one class, low steps, to show it works;
+- slide guidance 1 → 8 and watch typicality trade against diversity;
+- flip **velocity → score** on the *same* seed: near-identical output from the
+  same weights, which is Proposition 1 happening live;
+- flip **ODE → SDE** and vary σ, with σ = 0 recovering the ODE;
+- **Compare** mode, same seed, U-Net vs DiT side by side — close on this.
+
+**Timing sketch (25 min):** 3 problem/framing · 5 maths and the verification
+table · 3 architectures · 4 the training story including the scope cuts · 6
+live demo · 2 results and honest limitations · 2 what I'd do next · Q&A.
+
+Suggested slide count ~22. Do not fill slides with equations the audience
+cannot read — put one per slide and say it out loud.
