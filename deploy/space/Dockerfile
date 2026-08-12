@@ -29,17 +29,20 @@ WORKDIR $HOME/app
 RUN pip install --no-cache-dir --user \
       torch --index-url https://download.pytorch.org/whl/cpu
 
-# The app itself, straight from the repo.
+# The app itself, straight from the repo. huggingface_hub is listed explicitly
+# because start.sh needs it to pull the weights, and it lives in the [data]
+# extra alongside pyarrow — which this image has no use for.
 ARG EPSILON_REF=main
 RUN pip install --no-cache-dir --user \
-      "epsilon[web] @ git+https://github.com/aaarvs07ranger/epsilon@${EPSILON_REF}"
+      "epsilon[web] @ git+https://github.com/aaarvs07ranger/epsilon@${EPSILON_REF}" \
+      "huggingface_hub>=0.25"
 
 COPY --chown=user start.sh .
 RUN chmod +x start.sh
 
 # Which weights to pull, and from where. Override in the Space's Variables tab
 # without rebuilding.
-ENV EPSILON_MODEL_REPO=aaarvs07ranger/epsilon-imagenet64 \
+ENV EPSILON_MODEL_REPO=aaravs07/epsilon-imagenet64 \
     EPSILON_MODEL_FILES=unet_60k.pt,dit_100k.pt
 
 EXPOSE 7860

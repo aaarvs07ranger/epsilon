@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "epsilon"
 version = "0.1.0"
-description = "Epsilon: a from-scratch flow matching / diffusion text-to-image model (MIT 6.S184 mathematics)"
+description = "Epsilon: a from-scratch flow matching / diffusion image generator, class-conditional ImageNet-64 (MIT 6.S184 mathematics)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -28,6 +28,16 @@ dev = ["pytest>=8.0"]
 
 [tool.setuptools.packages.find]
 include = ["eps*"]
+
+# Non-Python files that the package reads at runtime. Without this they are
+# absent from a built wheel and the failure is remote-only: an editable install
+# works fine because it points at the source tree, so this can only bite when
+# somebody pip-installs from git — e.g. the Docker image behind the demo.
+#   eps/data/imagenet_classes.txt  -> imagenet_class_names() raises at import
+#   eps/web/static/*               -> the demo page 404s
+[tool.setuptools.package-data]
+"eps.data" = ["*.txt"]
+"eps.web" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

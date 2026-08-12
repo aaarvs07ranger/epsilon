@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Epsilon — flow matching &amp; diffusion</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<style>
+  :root {
+    --bg: #fafaf8; --panel: #ffffff; --ink: #1a1a1a; --muted: #6b6b6b;
+    --line: #e6e3dd; --accent: #2f5d8a; --accent-ink: #ffffff; --ok: #2e7d32;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12130f; --panel: #1b1c18; --ink: #ecebe6; --muted: #9a998f;
+      --line: #2c2d27; --accent: #7aa7d4; --accent-ink: #10120e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    max-width: 980px; margin: 0 auto; padding: 2.2rem 1.2rem 0.8rem;
+    display: flex; align-items: baseline; gap: 1.6rem; flex-wrap: wrap;
+  }
+  h1 { font-size: 1.7rem; margin: 0; letter-spacing: -0.02em; }
+  h1 .eps { color: var(--accent); font-family: Georgia, serif; }
+  nav { display: flex; gap: 0.3rem; margin-left: auto; }
+  nav button {
+    background: none; border: none; color: var(--muted); font: inherit;
+    padding: 0.3rem 0.9rem; border-radius: 999px; cursor: pointer;
+  }
+  nav button.active { background: var(--accent); color: var(--accent-ink); }
+  main { max-width: 980px; margin: 0 auto; padding: 0.8rem 1.2rem 4rem; }
+  .banner {
+    background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+    border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 0.7rem 1rem; margin-bottom: 1rem; font-size: 0.92rem; display: none;
+  }
+  .layout { display: grid; grid-template-columns: 400px 1fr; gap: 1.4rem; }
+  @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 1.2rem 1.3rem;
+  }
+  label { display: block; font-size: 0.82rem; color: var(--muted); margin: 0.9rem 0 0.25rem; }
+  label:first-child { margin-top: 0; }
+  input[type=text], input[type=number], select {
+    width: 100%; padding: 0.55rem 0.7rem; border: 1px solid var(--line);
+    border-radius: 7px; background: var(--bg); color: var(--ink); font: inherit;
+  }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .seg button {
+    flex: 1; padding: 0.5rem 0.4rem; background: var(--bg); border: none;
+    color: var(--muted); font: inherit; font-size: 0.9rem; cursor: pointer;
+  }
+  .seg button.active { background: var(--accent); color: var(--accent-ink); }
+  .slider-row { display: flex; align-items: center; gap: 0.8rem; }
+  .slider-row input[type=range] { flex: 1; accent-color: var(--accent); }
+  .slider-row output { min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
+  .go {
+    width: 100%; margin-top: 1.3rem; padding: 0.75rem; font: inherit;
+    font-weight: 600; background: var(--accent); color: var(--accent-ink);
+    border: none; border-radius: 8px; cursor: pointer;
+  }
+  .go:disabled { opacity: 0.55; cursor: wait; }
+  .result { display: flex; flex-direction: column; align-items: center; gap: 0.9rem; min-height: 380px; justify-content: center; }
+  .result img { width: 320px; height: 320px; border-radius: 8px; image-rendering: pixelated; border: 1px solid var(--line); }
+  .meta { font-size: 0.82rem; color: var(--muted); text-align: center; }
+  .row { display: flex; gap: 0.6rem; }
+  .ghost {
+    padding: 0.45rem 1rem; background: none; border: 1px solid var(--line);
+    color: var(--ink); border-radius: 7px; font: inherit; font-size: 0.88rem;
+    cursor: pointer; text-decoration: none;
+  }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.9rem; }
+  .grid figure { margin: 0; }
+  .grid img { width: 100%; border-radius: 8px; border: 1px solid var(--line); image-rendering: pixelated; cursor: pointer; }
+  .grid figcaption { font-size: 0.75rem; color: var(--muted); padding-top: 0.2rem; }
+  .prose { max-width: 760px; }
+  .prose h2 { margin-top: 2.2rem; font-size: 1.25rem; }
+  .prose p, .prose li { color: color-mix(in srgb, var(--ink) 88%, var(--muted)); }
+  .prose .eq { overflow-x: auto; padding: 0.4rem 0; }
+  .hint { font-size: 0.8rem; color: var(--muted); margin-top: 0.3rem; }
+  .spin {
+    width: 40px; height: 40px; border-radius: 50%;
+    border: 3px solid var(--line); border-top-color: var(--accent);
+    animation: r 0.8s linear infinite;
+  }
+  @keyframes r { to { transform: rotate(360deg); } }
+  .err { color: #b3462e; font-size: 0.9rem; }
+  .dice {
+    margin-top: 0.5rem; width: 100%; font-size: 0.82rem; padding: 0.4rem;
+  }
+  /* Side-by-side comparison: same prompt, same seed, both backbones. */
+  .versus { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
+  .versus figure { margin: 0; text-align: center; }
+  .versus img { width: 240px; height: 240px; border-radius: 8px; image-rendering: pixelated; border: 1px solid var(--line); }
+  .versus figcaption { font-size: 0.8rem; color: var(--muted); padding-top: 0.35rem; }
+  .versus figcaption b { color: var(--ink); font-weight: 600; }
+  .fade-in { animation: fi 0.35s ease both; }
+  @keyframes fi { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="eps">ε</span> Epsilon</h1>
+  <nav>
+    <button data-tab="generate" class="active">Generate</button>
+    <button data-tab="gallery">Gallery</button>
+    <button data-tab="about">About</button>
+  </nav>
+</header>
+<main>
+  <div class="banner" id="banner"></div>
+
+  <!-- ============================ GENERATE ============================ -->
+  <section id="tab-generate">
+    <div class="layout">
+      <div class="card">
+        <label for="prompt">Prompt (matched to an ImageNet class)</label>
+        <input type="text" id="prompt" placeholder="a golden retriever" list="class-list">
+        <datalist id="class-list"></datalist>
+        <div class="hint" id="match-hint"></div>
+        <button class="ghost dice" id="surprise" type="button">🎲 Surprise me</button>
+
+        <div id="model-wrap" hidden>
+          <label>Backbone</label>
+          <div class="seg" id="model"></div>
+        </div>
+
+        <label>Generative process</label>
+        <div class="seg" id="method">
+          <button data-v="ode" class="active">Flow Matching (ODE)</button>
+          <button data-v="sde">Diffusion (SDE)</button>
+        </div>
+
+        <label>Network parameterization for sampling</label>
+        <div class="seg" id="param">
+          <button data-v="velocity" class="active">Velocity field</button>
+          <button data-v="score">Score function</button>
+        </div>
+
+        <label>Guidance scale <em style="font-style:normal">w</em></label>
+        <div class="slider-row">
+          <input type="range" id="guidance" min="1" max="10" step="0.5" value="4">
+          <output id="guidance-out">4</output>
+        </div>
+
+        <label>Sampling steps</label>
+        <div class="slider-row">
+          <input type="range" id="steps" min="10" max="500" step="10" value="100">
+          <output id="steps-out">100</output>
+        </div>
+        <div class="hint" id="steps-hint"></div>
+
+        <div id="sigma-wrap" style="display:none">
+          <label>Diffusion coefficient σ</label>
+          <div class="slider-row">
+            <input type="range" id="sigma" min="0" max="3" step="0.1" value="1">
+            <output id="sigma-out">1.0</output>
+          </div>
+        </div>
+
+        <label for="seed">Seed (blank = random)</label>
+        <input type="number" id="seed" placeholder="random">
+
+        <button class="go" id="go">Generate</button>
+      </div>
+
+      <div class="card result" id="result">
+        <p class="meta">Type a prompt and press Generate.<br>
+        The model integrates an ODE/SDE from pure noise (t=0) to an image (t=1).</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ GALLERY ============================= -->
+  <section id="tab-gallery" hidden>
+    <div class="row" style="justify-content: space-between; margin-bottom: 1rem;">
+      <span class="meta" id="gallery-count"></span>
+      <button class="ghost" id="clear-gallery">Clear gallery</button>
+    </div>
+    <div class="grid" id="gallery"></div>
+  </section>
+
+  <!-- ============================= ABOUT ============================== -->
+  <section id="tab-about" hidden class="prose">
+    <h2>What is this?</h2>
+    <p>
+      Epsilon is a class-conditional image generator for ImageNet-1K at 64×64,
+      built from scratch on the mathematics of MIT&nbsp;6.S184
+      (<em>An Introduction to Flow Matching and Diffusion Models</em>).
+      Generation converts <strong>noise into data</strong> by simulating a
+      differential equation: samples start at pure Gaussian noise at time
+      \(t=0\) and end at an image at \(t=1\).
+    </p>
+
+    <h2>The probability path</h2>
+    <p>
+      Training chooses a <em>Gaussian conditional probability path</em> — a
+      gradual interpolation between noise and each data point \(z\):
+    </p>
+    <div class="eq">\[ p_t(x\mid z) = \mathcal{N}\!\big(\alpha_t z,\ \beta_t^2 I_d\big), \qquad \alpha_0 = \beta_1 = 0,\ \ \alpha_1 = \beta_0 = 1, \]</div>
+    <p>
+      with the CondOT schedulers \(\alpha_t = t\), \(\beta_t = 1-t\). Sampling
+      from the path is just \(x_t = \alpha_t z + \beta_t \varepsilon\) with
+      \(\varepsilon \sim \mathcal{N}(0, I)\).
+    </p>
+
+    <h2>Velocity field vs. score function</h2>
+    <p>
+      Two equivalent objects describe how probability mass moves along this path:
+    </p>
+    <ul>
+      <li>
+        The <strong>marginal velocity field</strong> \(u_t^{\text{target}}(x)\)
+        defines an ODE \(\mathrm{d}X_t = u_t(X_t)\,\mathrm{d}t\) whose
+        trajectories follow the path — this is a <em>flow model</em>.
+      </li>
+      <li>
+        The <strong>marginal score function</strong> \(\nabla \log p_t(x)\) is
+        the direction of steepest ascent of log-likelihood — the central object
+        of <em>diffusion models</em>.
+      </li>
+    </ul>
+    <p>For Gaussian paths they are linearly interchangeable (the conversion formula):</p>
+    <div class="eq">\[ u_t^{\text{target}}(x) = a_t \nabla \log p_t(x) + b_t x, \qquad a_t = \beta_t^2 \frac{\dot\alpha_t}{\alpha_t} - \dot\beta_t \beta_t, \quad b_t = \frac{\dot\alpha_t}{\alpha_t}, \]</div>
+    <p>
+      which is why the toggle above can drive the sampler with either
+      parameterization from the <em>same trained network</em>.
+    </p>
+
+    <h2>Training: flow matching and score matching</h2>
+    <p>
+      The marginal fields are intractable, but their <em>conditional</em>
+      counterparts have closed forms — and regressing against them minimises
+      the same objective up to a constant. The
+      <strong>conditional flow matching</strong> loss is
+    </p>
+    <div class="eq">\[ \mathcal{L}_{\text{CFM}}(\theta) = \mathbb{E}_{t,\,z,\,\varepsilon} \big\| u_t^\theta(\alpha_t z + \beta_t \varepsilon) - (\dot\alpha_t z + \dot\beta_t \varepsilon) \big\|^2, \]</div>
+    <p>and the <strong>denoising score matching</strong> loss is</p>
+    <div class="eq">\[ \mathcal{L}_{\text{DSM}}(\theta) = \mathbb{E}_{t,\,z,\,\varepsilon} \Big\| s_t^\theta(\alpha_t z + \beta_t \varepsilon) + \tfrac{\varepsilon}{\beta_t} \Big\|^2, \]</div>
+    <p>
+      with \(t \sim \mathrm{Unif}[0,1]\), \(z\) from the dataset,
+      \(\varepsilon \sim \mathcal{N}(0, I)\). The network that minimises either
+      loss equals the corresponding marginal field.
+    </p>
+
+    <h2>Sampling: ODE or SDE</h2>
+    <p><strong>Flow matching (ODE)</strong> integrates, with e.g. the Euler method,</p>
+    <div class="eq">\[ X_0 \sim \mathcal{N}(0, I), \qquad \mathrm{d}X_t = u_t^\theta(X_t)\,\mathrm{d}t \quad\Rightarrow\quad X_1 \approx \text{image}. \]</div>
+    <p>
+      <strong>Diffusion (SDE)</strong> adds Langevin-style noise while
+      preserving the same marginals — valid for <em>any</em> diffusion
+      coefficient \(\sigma_t \ge 0\):
+    </p>
+    <div class="eq">\[ \mathrm{d}X_t = \Big[ u_t^\theta(X_t) + \tfrac{\sigma_t^2}{2} \nabla \log p_t(X_t) \Big]\,\mathrm{d}t + \sigma_t\, \mathrm{d}W_t, \]</div>
+    <p>
+      simulated with Euler–Maruyama:
+      \(X_{t+h} = X_t + h\,\text{drift} + \sigma_t \sqrt{h}\,\varepsilon\).
+      Setting \(\sigma_t = 0\) recovers the ODE exactly.
+    </p>
+
+    <h2>Classifier-free guidance</h2>
+    <p>
+      To make samples adhere to the class label \(y\), the model is trained
+      with the label randomly dropped (probability \(\eta\)) so one network
+      learns both the guided field \(u_t^\theta(x|y)\) and the unguided field
+      \(u_t^\theta(x|\varnothing)\). At sampling time they are combined with
+      guidance scale \(w\):
+    </p>
+    <div class="eq">\[ \tilde{u}_t(x\mid y) = (1 - w)\, u_t^\theta(x\mid \varnothing) + w\, u_t^\theta(x\mid y). \]</div>
+    <p>
+      \(w=1\) is plain conditional sampling; \(w>1\) amplifies the
+      class-dependent component — a heuristic that markedly improves prompt
+      adherence at some cost in diversity.
+    </p>
+
+    <h2>The full pipeline</h2>
+    <ol>
+      <li>Draw noise \(X_0 \sim \mathcal{N}(0, I_{3\cdot 64\cdot 64})\).</li>
+      <li>Resolve your prompt to an ImageNet class \(y\).</li>
+      <li>At each of \(n\) steps, evaluate the U-Net/DiT at \((X_t, t, y)\) and
+          \((X_t, t, \varnothing)\), combine with CFG, convert between velocity
+          and score if requested, and take an Euler / Euler–Maruyama step.</li>
+      <li>Return \(X_1\), mapped from \([-1,1]\) to pixels.</li>
+    </ol>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const state = { method: "ode", param: "velocity", solver: "euler", device: "",
+                classes: [], models: [], model: null };
+
+/* ---------- tabs ---------- */
+document.querySelectorAll("nav button").forEach((b) => {
+  b.onclick = () => {
+    document.querySelectorAll("nav button").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active");
+    for (const t of ["generate", "gallery", "about"])
+      $("#tab-" + t).hidden = t !== b.dataset.tab;
+    if (b.dataset.tab === "gallery") renderGallery();
+    if (b.dataset.tab === "about" && window.renderMathInElement)
+      renderMathInElement($("#tab-about"), { delimiters: [
+        { left: "\\[", right: "\\]", display: true },
+        { left: "\\(", right: "\\)", display: false },
+      ]});
+  };
+});
+
+/* ---------- segmented controls ---------- */
+function seg(id, key) {
+  $("#" + id).querySelectorAll("button").forEach((b) => {
+    b.onclick = () => {
+      $("#" + id).querySelectorAll("button").forEach((x) => x.classList.remove("active"));
+      b.classList.add("active");
+      state[key] = b.dataset.v;
+      $("#sigma-wrap").style.display = state.method === "sde" ? "" : "none";
+    };
+  });
+}
+seg("method", "method");
+seg("param", "param");
+
+/* ---------- sliders ---------- */
+for (const [id, out, fmt] of [["guidance", "guidance-out", (v) => v],
+                              ["steps", "steps-out", (v) => v],
+                              ["sigma", "sigma-out", (v) => (+v).toFixed(1)]]) {
+  $("#" + id).oninput = () => ($("#" + out).textContent = fmt($("#" + id).value));
+}
+
+/* ---------- health + model picker ---------- */
+fetch("/api/health").then((r) => r.json()).then((h) => {
+  if (!h.ready) {
+    const b = $("#banner");
+    b.style.display = "block";
+    b.textContent = "No trained checkpoint is loaded on the server — generation is disabled. " +
+                    "Set EPSILON_MODELS and restart to enable it.";
+    return;
+  }
+  const models = h.models || [];
+  state.models = models;
+  state.model = models.length ? models[0].key : null;
+  state.device = h.device || "";
+  // On a CPU-only host (e.g. a free Spaces tier) 100 Euler steps is minutes per
+  // image. Heun is 2nd-order, so 30 Heun steps ≈ 60 function evaluations and
+  // looks far better than 30 Euler ones at similar cost. Default accordingly
+  // and say so, rather than letting a visitor conclude the model is broken.
+  if (state.device.startsWith("cpu")) {
+    state.solver = "heun";
+    $("#steps").value = 30;
+    $("#steps-out").textContent = 30;
+    $("#steps-hint").textContent =
+      "Running on CPU — defaulting to 30 Heun steps (~2nd-order). Higher is sharper but slower.";
+  }
+  // Only worth showing the control when there is an actual choice to make.
+  if (models.length > 1) {
+    const opts = models.map((m) =>
+      `<button data-v="${m.key}">${m.label} <span style="opacity:.7">${m.params_m}M</span></button>`);
+    // The interesting one: same prompt, same seed, both backbones side by side.
+    opts.push(`<button data-v="both">Compare</button>`);
+    $("#model").innerHTML = opts.join("");
+    $("#model").querySelector("button").classList.add("active");
+    seg("model", "model");
+    $("#model-wrap").hidden = false;
+  }
+});
+fetch("/api/classes").then((r) => r.json()).then((cs) => {
+  state.classes = cs;
+  $("#class-list").innerHTML = cs.map((c) => `<option value="${c.name}">`).join("");
+});
+$("#prompt").addEventListener("input", () => {
+  const q = $("#prompt").value.trim().toLowerCase();
+  const hit = q && state.classes.find((c) => c.name.toLowerCase().includes(q));
+  $("#match-hint").textContent = hit ? `→ class ${hit.id}: ${hit.name}` : "";
+});
+
+/* ---------- surprise me ---------- */
+$("#surprise").onclick = () => {
+  if (!state.classes.length) return;
+  const c = state.classes[Math.floor(Math.random() * state.classes.length)];
+  $("#prompt").value = c.name;
+  $("#prompt").dispatchEvent(new Event("input"));
+};
+
+/* ---------- generation ---------- */
+async function callGenerate(body) {
+  const r = await fetch("/api/generate", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(((await r.json()) || {}).detail || r.statusText);
+  return r.json();
+}
+const caption = (d) =>
+  `${d.class_name} · ${d.method.toUpperCase()} · ${d.parameterization} · w=${d.guidance_scale} · ${d.num_steps} steps · seed ${d.seed}`;
+
+$("#go").onclick = async () => {
+  const btn = $("#go"), res = $("#result");
+  const compare = state.model === "both";
+  btn.disabled = true;
+  res.innerHTML = `<div class="spin"></div><p class="meta">Integrating the ${state.method.toUpperCase()} — ${$("#steps").value} steps${compare ? " × 2 backbones" : ""}…</p>`;
+  try {
+    const base = {
+      prompt: $("#prompt").value || null,
+      method: state.method,
+      parameterization: state.param,
+      solver: state.solver,
+      guidance_scale: +$("#guidance").value,
+      num_steps: +$("#steps").value,
+      sigma: +$("#sigma").value,
+      seed: $("#seed").value === "" ? null : +$("#seed").value,
+    };
+
+    if (compare) {
+      // Pin the seed client-side so both backbones start from *identical*
+      // noise — otherwise you are comparing two random draws, not two models.
+      const seed = base.seed ?? Math.floor(Math.random() * 2 ** 31);
+      const keys = state.models.map((m) => m.key);
+      const outs = [];
+      for (const k of keys) outs.push(await callGenerate({ ...base, seed, model: k }));
+      res.innerHTML = `
+        <div class="versus fade-in">${outs.map((d) => `
+          <figure>
+            <img src="${d.image}" alt="${d.class_name}">
+            <figcaption><b>${d.model_label}</b></figcaption>
+          </figure>`).join("")}
+        </div>
+        <div class="meta">${caption(outs[0])} · same noise, both backbones</div>
+        <div class="row">${outs.map((d) => `
+          <a class="ghost" download="epsilon_${d.model}_${d.class_id}_${d.seed}.png" href="${d.image}">Download ${d.model_label}</a>`).join("")}
+        </div>`;
+      return;
+    }
+
+    const d = await callGenerate({ ...base, model: state.model });
+    const label = caption(d) + (d.model_label ? ` · ${d.model_label}` : "");
+    res.innerHTML = `
+      <img class="fade-in" src="${d.image}" alt="${d.class_name}">
+      <div class="meta">${label}</div>
+      <div class="row">
+        <a class="ghost" download="epsilon_${d.class_id}_${d.seed}.png" href="${d.image}">Download</a>
+        <button class="ghost" id="save-btn">Save to gallery</button>
+      </div>`;
+    $("#save-btn").onclick = () => { saveToGallery(d, label); $("#save-btn").textContent = "Saved ✓"; };
+  } catch (e) {
+    res.innerHTML = `<p class="err">${e.message}</p>`;
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+/* ---------- gallery (localStorage) ---------- */
+const KEY = "epsilon-gallery";
+const load = () => JSON.parse(localStorage.getItem(KEY) || "[]");
+function saveToGallery(d, label) {
+  const items = load();
+  items.unshift({ image: d.image, label, at: Date.now() });
+  localStorage.setItem(KEY, JSON.stringify(items.slice(0, 60)));
+}
+function renderGallery() {
+  const items = load();
+  $("#gallery-count").textContent = items.length ? `${items.length} saved generation(s)` : "Nothing saved yet.";
+  $("#gallery").innerHTML = items.map((it, i) => `
+    <figure>
+      <a download="epsilon_${i}.png" href="${it.image}"><img src="${it.image}" alt=""></a>
+      <figcaption>${it.label}</figcaption>
+    </figure>`).join("");
+}
+$("#clear-gallery").onclick = () => { localStorage.removeItem(KEY); renderGallery(); };
+</script>
+</body>
+</html>
