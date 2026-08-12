@@ -1,5 +1,7 @@
 # ε Epsilon
 
+Try it out for free: https://huggingface.co/spaces/aaravs07/epsilon
+
 A flow-matching and score-based diffusion image generator, written from
 scratch. Class-conditional ImageNet-1K at 64×64, two backbones, and a web demo
 you can poke at.
